@@ -258,7 +258,8 @@ class Water {
     this.uTime = { value: 0 };
     this.speed = env.waterSpeed ?? 1;
     const strength = (env.waterStrength ?? 1).toFixed(3);
-    this.mat = new THREE.MeshStandardMaterial({ color, roughness: 0.07, metalness: 0.0 });
+    // roughness >= 0.1 keeps the sun glint below half-float overflow (which bloom turns into black patches)
+    this.mat = new THREE.MeshStandardMaterial({ color, roughness: 0.1, metalness: 0.0 });
     this.mat.customProgramCacheKey = () => 'water-' + strength;
     this.mat.onBeforeCompile = (sh) => {
       sh.uniforms.uWaveTex = { value: this.tex };
