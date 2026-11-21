@@ -42,20 +42,13 @@
     </section>
   </div>
 
-  <!-- shown in portrait once the controller is running -->
-  <div id="rotate" class="overlay">
-    <div class="phoneicon"></div>
-    <p>Turn your phone sideways</p>
-    <p class="note">The controller works in landscape. If it doesn't rotate, turn off the phone's rotation lock.</p>
-  </div>
-
   <!-- first tap: needed for motion-sensor permission, fullscreen + landscape lock and keep-awake -->
   <div id="gate" class="overlay">
     <div class="card">
       <h1>SKY RINGS</h1>
       <p>Phone controller for game <b id="gateCode"></b></p>
       <button id="gateBtn" class="accent big">Tap to start controller</button>
-      <p class="note">Hold the phone sideways. Tilt it to bank and pitch the plane, keep it level to fly level, and press FIRE to shoot.</p>
+      <p class="note">Hold the phone sideways (or upright if your screen is rotation-locked). Tilt it to bank and pitch the plane, keep it level to fly level, and press FIRE to shoot.</p>
       <p class="note" id="gateHint"></p>
       <p class="note err" id="gateErr"></p>
     </div>
@@ -71,6 +64,7 @@
       <div class="calmain">
         <h2 id="calTitle"></h2>
         <p id="calDesc"></p>
+        <p class="tiltread" id="calTilt"></p>
         <p class="note" id="calMsg"></p>
         <div class="row">
           <button id="calCancel">Cancel</button>

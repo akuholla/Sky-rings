@@ -121,8 +121,15 @@ function uiLoop() {
   $('vBank').textContent = deg(angles.bank);
   $('vPitch').textContent = deg(angles.pitch);
   if (!$('cal').classList.contains('hidden')) {
-    const live = computeAngles(g, calDraft.n0 ? { n0: calDraft.n0, r: calDraft.r || [0, 0, 0], p: calDraft.p || [0, 0, 0] } : null);
+    const live = calLive();
     drawHorizon($('calHorizon'), live.bank, live.pitch);
+    const t = $('calTilt');
+    if (live.tilt == null) { t.textContent = ''; t.className = 'tiltread'; }
+    else {
+      const ok = live.tilt >= 10;
+      t.textContent = `Tilt ${Math.round(live.tilt)}°` + (ok ? ' ✓' : ' — tilt further');
+      t.className = 'tiltread' + (ok ? ' ok' : '');
+    }
   }
 }
 
@@ -149,6 +156,25 @@ showSens();
 sens.addEventListener('input', () => { maxTilt = +sens.value; localStorage.setItem(SENS_KEY, maxTilt); showSens(); });
 
 // ---------------------------------------------------------------- calibration wizard
+// Live preview for the wizard. The direction being calibrated isn't known until you tap
+// Set, so the dial shows how far the phone has tilted away from the "level" capture:
+//   step 2 (bank right): total tilt from level, drawn as a right bank
+//   step 3 (nose down):  bank from step 2 + the remaining tilt, drawn as nose-down
+function calLive() {
+  if (!g || !calDraft.n0 || calStep === 0) return { bank: 0, pitch: 0, tilt: null };
+  const gn = norm(g), n0 = calDraft.n0;
+  const up = dot(gn, n0);
+  const d = reject(gn, n0);
+  if (calStep === 1) {
+    const tilt = Math.atan2(len(d), up) * DEG;
+    return { bank: tilt, pitch: 0, tilt };
+  }
+  const bank = Math.atan2(dot(gn, calDraft.r), up) * DEG;
+  const rest = reject(d, calDraft.r);
+  const tilt = Math.atan2(len(rest), up) * DEG;
+  return { bank, pitch: -tilt, tilt };
+}
+
 const STEPS = [
   { title: 'Hold it level', desc: 'Hold the phone sideways the way you want to fly level, then tap Set.' },
   { title: 'Bank right', desc: 'Tilt the phone to bank RIGHT (right edge down, about 30°), then tap Set.' },
@@ -247,11 +273,11 @@ $('gateBtn').addEventListener('click', async () => {
   if (!window.isSecureContext) $('gateErr').textContent = 'This page is not secure (https) — the phone will not share motion data.';
   window.addEventListener('devicemotion', onMotion);
   $('gate').classList.add('hidden');
-  document.body.classList.add('started'); // enables the "turn your phone" prompt in portrait
+  document.body.classList.add('started');
   if (!cal) openCal();
   // nice-to-haves; never wait on them (some browsers leave these promises pending)
   const soft = (fn) => { try { Promise.resolve(fn()).catch(() => {}); } catch {} };
-  // Android: go fullscreen and lock to landscape (iOS Safari can't lock; it shows the rotate prompt)
+  // Android: go fullscreen and lock to landscape. iOS Safari cannot lock; the layout also works upright.
   soft(() => (document.documentElement.requestFullscreen?.({ navigationUI: 'hide' }) ?? Promise.resolve())
     .then(() => screen.orientation?.lock?.('landscape')));
   const keepAwake = () => soft(() => navigator.wakeLock?.request('screen'));
