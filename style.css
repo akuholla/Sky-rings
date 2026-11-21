@@ -94,3 +94,21 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 5px; margin-right: 2p
 #fuelWarn { position: absolute; left: 50%; bottom: 80px; transform: translateX(-50%); font: 700 18px system-ui, sans-serif; letter-spacing: 2px; color: #ff6a4a; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7); }
 #fuelWarn.blink { animation: blink 0.8s steps(2) infinite; }
 @keyframes blink { 50% { opacity: 0.25; } }
+
+#pairBtn { width: 100%; margin-top: 16px; padding: 10px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.18); background: rgba(255, 255, 255, 0.07); color: #fff; display: flex; align-items: center; justify-content: center; gap: 8px; }
+#pairBtn:hover { background: rgba(255, 255, 255, 0.13); }
+.pdot { width: 9px; height: 9px; border-radius: 50%; background: rgba(255, 255, 255, 0.3); display: inline-block; }
+.pdot.on { background: #57d97a; box-shadow: 0 0 8px #57d97a; }
+#pair { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(10, 5, 4, 0.7); z-index: 20; }
+.pairpanel { width: min(680px, 94vw); }
+.pairpanel h2 { margin: 0 0 12px; color: #ffd9a8; }
+.pairgrid { display: flex; gap: 18px; align-items: flex-start; }
+.qrbox { background: #fff; padding: 8px; border-radius: 10px; flex: none; }
+.qrbox img { display: block; width: 190px; height: 190px; image-rendering: pixelated; }
+.pairsteps { margin: 0; padding-left: 18px; font-size: 13.5px; line-height: 1.45; color: rgba(255, 240, 230, 0.9); }
+.pairsteps li { margin-bottom: 6px; }
+.pairsteps code, #pairError code { font-size: 12px; color: #ffd9a8; word-break: break-all; }
+.pairstatus { display: flex; align-items: center; gap: 6px; margin: 14px 0 4px; font-size: 14px; }
+#pairError { color: #ffb0a0; font-size: 14px; }
+#pairClose { margin-top: 12px; padding: 10px 22px; border: none; border-radius: 10px; font-weight: 700; color: #2a1206; background: linear-gradient(180deg, #ffd56a, #ff8f3a); }
+#phoneBadge { position: absolute; right: 20px; bottom: 44px; font-size: 12px; color: #9ff0b5; text-shadow: 0 1px 2px #000; }

@@ -13,6 +13,7 @@ import { Hud } from './hud.js';
 import { Atmosphere, buildLook, TIME_LIST, WEATHER_LIST } from './atmosphere.js';
 import { Sound } from './sound.js';
 import { Combat } from './combat.js';
+import { PhoneController } from './phone.js';
 
 // ---------------------------------------------------------------------------
 // Renderer, camera, post-processing
@@ -63,6 +64,7 @@ plane.group.add(planeFill);
 const trails = [new Trail(scene), new Trail(scene)];
 const explosion = new Explosion(scene);
 const combat = new Combat(scene, explosion, sound);
+const phone = new PhoneController();
 
 let def = null, world = null, course = null, clouds = null;
 let currentScene = null;
@@ -208,6 +210,43 @@ optInvert.addEventListener('change', () => { settings.invert = optInvert.checked
 optLevel.addEventListener('change', () => { settings.autoLevel = optLevel.checked; saveSettings(); });
 startBtn.addEventListener('click', () => closeMenu());
 
+// ---- phone pairing panel
+const pairEl = document.getElementById('pair');
+const pairDots = document.querySelectorAll('.pdot');
+document.getElementById('pairBtn').addEventListener('click', async () => {
+  pairEl.classList.remove('hidden');
+  const ok = await phone.checkServer();
+  document.getElementById('pairBody').classList.toggle('hidden', !ok);
+  document.getElementById('pairError').classList.toggle('hidden', ok);
+  if (!ok) return;
+  phone.connect();
+  localStorage.setItem('skyrings.phonepaired', '1');
+  const url = phone.pairUrl();
+  document.getElementById('pairUrl').textContent = url;
+  document.getElementById('pairCode').textContent = phone.code;
+  const img = document.getElementById('pairQr');
+  if (window.qrcode) {
+    const qr = window.qrcode(0, 'M');
+    qr.addData(url);
+    qr.make();
+    img.src = qr.createDataURL(6, 2);
+  } else {
+    img.alt = 'QR library could not load — type the link instead';
+  }
+});
+document.getElementById('pairClose').addEventListener('click', () => pairEl.classList.add('hidden'));
+phone.onStart = () => { if (state === 'menu') closeMenu(); };
+phone.onMenu = () => { if (state !== 'menu') openMenu(); };
+// reconnect automatically if this browser was paired before
+if (localStorage.getItem('skyrings.phonepaired')) phone.checkServer().then((ok) => ok && phone.connect());
+function updatePhoneStatus() {
+  const on = phone.active;
+  for (const d of pairDots) d.classList.toggle('on', on);
+  const ps = document.getElementById('pairStatus');
+  ps.textContent = !on ? 'Waiting for phone…' : phone.state.cal ? 'Phone connected ✓ — tilt it to see the plane move' : 'Phone connected — finish calibration on the phone';
+  document.getElementById('phoneBadge').classList.toggle('hidden', !on);
+}
+
 function refreshMenu() {
   for (const g of groups) for (const b of g.box.children) b.classList.toggle('active', b.dataset.id === settings[g.key]);
   startBtn.textContent = started ? 'Resume' : 'Start Flying';
@@ -283,7 +322,10 @@ function stepPlaying(dt) {
   prevPos.copy(flight.pos);
   fuel = Math.max(0, fuel - fuelBurnRate() * dt);
   if (fuel <= 0 && flight.engineOn) { flight.engineOn = false; hud.popup('OUT OF FUEL — glide through a ring!', 'bad'); }
-  flight.update(dt, readInput(), { autoLevel: settings.autoLevel });
+  // keyboard wins while an arrow key is held; otherwise a connected phone flies the plane
+  let input = readInput(), autoLevel = settings.autoLevel;
+  if (phone.ready && input.roll === 0 && input.pitch === 0) { input = phone.flightInput(flight); autoLevel = false; }
+  flight.update(dt, input, { autoLevel });
   stats.time += dt;
   for (const ev of course.update(prevPos, flight.pos)) {
     if (ev.type === 'pass') {
@@ -301,7 +343,7 @@ function stepPlaying(dt) {
       hud.popup('MISSED', 'bad');
     }
   }
-  for (const ev of combat.update(dt, { flight, plane, firing: !!keys.Space, active: true })) {
+  for (const ev of combat.update(dt, { flight, plane, firing: !!keys.Space || (phone.active && phone.state.fire), active: true })) {
     if (ev.type === 'kill') {
       stats.score += ev.points;
       stats.kills++;
@@ -404,6 +446,7 @@ function frame(now) {
     hud.updateEnemies(camera, combat.enabled ? combat.enemies : [], flight.pos);
   }
 
+  updatePhoneStatus();
   composer.render();
 }
 
@@ -419,4 +462,4 @@ document.getElementById('loading')?.remove();
 requestAnimationFrame((t) => { lastT = t; frame(t); });
 
 // handy for debugging from the console
-window.__sim = { flight, get course() { return course; }, get world() { return world; }, get state() { return state; }, get lastT() { return lastT; }, get look() { return look; }, atmo, combat, keys, get fuel() { return fuel; }, set fuel(v) { fuel = v; }, fuelBurnRate, stats, settings };
+window.__sim = { flight, get course() { return course; }, get world() { return world; }, get state() { return state; }, get lastT() { return lastT; }, get look() { return look; }, atmo, combat, keys, phone, get fuel() { return fuel; }, set fuel(v) { fuel = v; }, fuelBurnRate, stats, settings };

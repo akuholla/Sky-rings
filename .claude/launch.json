@@ -4,7 +4,7 @@
     {
       "name": "flightsim",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8137"],
+      "runtimeArgs": ["-u", "server.py"],
       "port": 8137
     }
   ]

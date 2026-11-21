@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Sky Rings — Flight Sim</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js" defer></script>
   <script type="importmap">
   {
     "imports": {
@@ -39,6 +40,7 @@
       <div><span class="label">ALT</span> <span id="alt">0</span> m</div>
       <div id="fuel"><span class="label">FUEL</span><div class="bar"><div class="fill" id="fuelFill"></div></div><span id="fuelPct">100%</span></div>
     </div>
+    <div id="phoneBadge" class="hidden">📱 Phone controller</div>
     <div id="help">← → roll &nbsp;·&nbsp; ↑ ↓ pitch &nbsp;·&nbsp; Space fire &nbsp;·&nbsp; Esc menu</div>
   </div>
 
@@ -67,6 +69,7 @@
         <input type="range" id="optGap" min="200" max="600" step="10" />
         <span id="optGapVal" class="rangeval"></span>
       </label>
+      <button id="pairBtn"><span class="pdot"></span>Pair phone as controller</button>
       <button id="start">Start Flying</button>
       <div class="keys">
         <span><kbd>←</kbd><kbd>→</kbd> roll / bank to turn</span>
@@ -74,6 +77,26 @@
         <span><kbd>Space</kbd> fire lasers</span>
         <span><kbd>Esc</kbd> menu</span>
       </div>
+    </div>
+  </div>
+
+  <div id="pair" class="hidden">
+    <div class="panel pairpanel">
+      <h2>Phone controller</h2>
+      <div id="pairBody">
+        <div class="pairgrid">
+          <div class="qrbox"><img id="pairQr" alt="QR code for the phone controller" /></div>
+          <ol class="pairsteps">
+            <li>Connect the phone to the <b>same Wi-Fi</b> as this computer.</li>
+            <li>Scan the QR code with the phone camera, or open:<br /><code id="pairUrl"></code></li>
+            <li>The phone will warn about the certificate (it's this computer's own). Choose <i>Show details → visit website</i> (iPhone) or <i>Advanced → Proceed</i> (Android).</li>
+            <li>Tap <b>Tap to start controller</b>, allow motion access, and follow the 3-step calibration.</li>
+          </ol>
+        </div>
+        <p class="pairstatus"><span class="pdot"></span><span id="pairStatus">Waiting for phone…</span> &nbsp;·&nbsp; code <b id="pairCode"></b></p>
+      </div>
+      <p id="pairError" class="hidden">The phone controller needs the game's own server. Stop the current server and run <code>python3 server.py</code> in the game folder, then open <code>http://localhost:8137</code>.</p>
+      <button id="pairClose">Done</button>
     </div>
   </div>
 

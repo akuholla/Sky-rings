@@ -1,0 +1,10 @@
+{
+  "name": "Sky Rings Controller",
+  "short_name": "Sky Rings",
+  "description": "Tilt your phone to fly the Sky Rings biplane.",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#140a08",
+  "theme_color": "#1a0e0a",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

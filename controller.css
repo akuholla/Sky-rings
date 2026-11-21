@@ -1,0 +1,117 @@
+/* Sky Rings phone controller — designed for phones held sideways (landscape).
+   Sizes use the dynamic viewport (dvh) so browser bars don't push things off screen,
+   and safe-area insets keep controls clear of notches and the home indicator. */
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none;
+  background: radial-gradient(ellipse at 30% 20%, #3a1e16, #140a08 70%) fixed;
+  color: #fff; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  -webkit-text-size-adjust: 100%;
+}
+.hidden { display: none !important; }
+
+button {
+  font: inherit; font-size: 15px; color: #fff; min-height: 44px; padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.18); background: rgba(255, 255, 255, 0.08);
+  border-radius: 12px; cursor: pointer; touch-action: manipulation;
+}
+button:active { background: rgba(255, 255, 255, 0.2); transform: scale(0.98); }
+button.accent { border: none; color: #2a1206; font-weight: 700; background: linear-gradient(180deg, #ffd56a, #ff8f3a); }
+button.big { min-height: 52px; padding: 12px 24px; font-size: 18px; }
+
+/* ---------------------------------------------------------------- main layout */
+#app {
+  position: fixed; inset: 0; height: 100dvh;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: clamp(10px, 3vw, 28px);
+  padding: max(10px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+           max(10px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+}
+#left { display: flex; flex-direction: column; justify-content: center; gap: clamp(6px, 2.4dvh, 14px); min-width: 0; max-width: 420px; justify-self: center; width: 100%; }
+#right { display: flex; align-items: center; justify-content: center; height: 100%; }
+
+#status { display: flex; align-items: center; gap: 8px; font-size: 14px; color: rgba(255, 230, 210, 0.92); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#status .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: #ff5a4a; box-shadow: 0 0 8px #ff5a4a; }
+#status.ok .dot { background: #57d97a; box-shadow: 0 0 8px #57d97a; }
+#status.wait .dot { background: #ffb43a; box-shadow: 0 0 8px #ffb43a; }
+
+#mid { display: flex; align-items: center; gap: 14px; }
+#horizon { flex: none; width: clamp(84px, 32dvh, 160px); height: clamp(84px, 32dvh, 160px); }
+#info { display: flex; flex-direction: column; gap: 10px; min-width: 0; flex: 1; }
+#vals { display: flex; gap: 14px; font: 600 14px ui-monospace, Menlo, monospace; color: rgba(255, 217, 168, 0.8); }
+#vals b { color: #ffd9a8; display: inline-block; min-width: 3.2ch; }
+.sens { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; font-size: 13px; color: rgba(255, 230, 210, 0.85); }
+.sens input { width: 100%; min-width: 60px; height: 28px; accent-color: #ffb347; }
+#sensVal { font: 600 12px ui-monospace, Menlo, monospace; min-width: 3.5ch; text-align: right; }
+
+#btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+#btns button { min-height: clamp(38px, 11dvh, 48px); padding: 6px 8px; }
+
+/* big round FIRE button for the right thumb */
+#fireBtn {
+  --size: min(78dvh, 44vw, 320px);
+  width: var(--size); height: var(--size); min-height: 0; padding: 0; border-radius: 50%;
+  font-size: calc(var(--size) * 0.14); font-weight: 800; letter-spacing: 0.12em;
+  background: radial-gradient(circle at 40% 35%, #ff7a5a, #c92a1a 70%); border: 4px solid rgba(255, 220, 200, 0.5);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), inset 0 -6px 14px rgba(0, 0, 0, 0.3);
+  transition: transform 0.05s, box-shadow 0.1s;
+}
+#fireBtn.on { background: radial-gradient(circle at 40% 35%, #8ef0ff, #1a8ac9 70%); transform: scale(0.95); box-shadow: 0 0 40px rgba(120, 230, 255, 0.8); }
+
+/* ---------------------------------------------------------------- overlays */
+.overlay {
+  position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center;
+  background: rgba(10, 6, 6, 0.9); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  padding: max(10px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right))
+           max(10px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+}
+.card {
+  width: 100%; max-width: 560px; max-height: 100%; overflow-y: auto; text-align: center;
+  background: rgba(30, 18, 20, 0.94); border: 1px solid rgba(255, 200, 150, 0.2); border-radius: 16px;
+  padding: clamp(12px, 3dvh, 20px) 20px; touch-action: pan-y;
+}
+.card h1 { margin: 0 0 4px; font-size: clamp(22px, 7dvh, 30px); letter-spacing: 5px; background: linear-gradient(180deg, #ffe08a, #ff8a3a); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.card h2 { margin: 2px 0 6px; font-size: 20px; color: #ffd9a8; }
+.card p { margin: 6px 0; color: rgba(255, 235, 220, 0.92); font-size: 15px; }
+.card .note { font-size: 13px; color: rgba(255, 220, 200, 0.7); }
+.card .err { color: #ffb0a0; }
+.row { display: flex; gap: 10px; justify-content: center; margin-top: 8px; }
+
+/* calibration card: diagram on the left, instructions on the right */
+.calcard { display: flex; gap: 18px; align-items: center; text-align: left; }
+.calside { display: flex; flex-direction: column; align-items: center; gap: 10px; flex: none; }
+.calmain { flex: 1; min-width: 0; }
+.calmain .row { justify-content: flex-start; }
+#calHorizon { width: clamp(80px, 30dvh, 130px); height: clamp(80px, 30dvh, 130px); }
+.steps { display: flex; justify-content: center; gap: 8px; }
+.steps span { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; border: 1px solid rgba(255, 255, 255, 0.25); color: rgba(255, 255, 255, 0.6); }
+.steps span.active { background: #ffb347; color: #2a1206; border-color: #ffb347; font-weight: 700; }
+.steps span.done { background: rgba(87, 217, 122, 0.3); border-color: #57d97a; color: #fff; }
+
+/* "turn your phone" prompt: only in portrait, and only after the controller started */
+#rotate { display: none; flex-direction: column; text-align: center; z-index: 30; gap: 4px; }
+#rotate p { margin: 4px 16px; font-size: 18px; }
+#rotate .note { font-size: 13px; color: rgba(255, 220, 200, 0.7); max-width: 300px; }
+.phoneicon {
+  width: 54px; height: 92px; border: 4px solid #ffd9a8; border-radius: 12px; margin-bottom: 14px; position: relative;
+  animation: turn 2s ease-in-out infinite;
+}
+.phoneicon::after { content: ''; position: absolute; left: 50%; bottom: 6px; width: 14px; height: 4px; margin-left: -7px; border-radius: 2px; background: #ffd9a8; }
+@keyframes turn { 0%, 25% { transform: rotate(0deg); } 60%, 100% { transform: rotate(-90deg); } }
+
+@media (orientation: portrait) {
+  body.started #rotate { display: flex; }
+  .calcard { flex-direction: column; text-align: center; }
+  .calmain .row { justify-content: center; }
+}
+
+/* very short landscape screens (small phones with browser bars showing) */
+@media (orientation: landscape) and (max-height: 360px) {
+  #status { font-size: 12px; }
+  #vals { font-size: 12px; }
+  .sens { font-size: 12px; }
+  button { font-size: 14px; }
+  .card p { font-size: 14px; margin: 4px 0; }
+  .card .note { font-size: 12px; }
+  button.big { min-height: 44px; padding: 8px 18px; font-size: 16px; }
+}

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Sky Rings" />
+  <meta name="theme-color" content="#1a0e0a" />
+  <meta name="format-detection" content="telephone=no" />
+  <link rel="manifest" href="controller.webmanifest" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <title>Sky Rings — Phone Controller</title>
+  <link rel="stylesheet" href="controller.css" />
+</head>
+<body>
+  <div id="app">
+    <section id="left">
+      <div id="status"><span class="dot"></span><span id="statusText">Connecting…</span></div>
+      <div id="mid">
+        <canvas id="horizon" width="240" height="240"></canvas>
+        <div id="info">
+          <div id="vals"><span>Bank <b id="vBank">0°</b></span><span>Pitch <b id="vPitch">0°</b></span></div>
+          <label class="sens">
+            <span>Sensitivity</span>
+            <input type="range" id="sens" min="15" max="60" step="1" />
+            <span id="sensVal"></span>
+          </label>
+        </div>
+      </div>
+      <div id="btns">
+        <button id="calBtn">Calibrate</button>
+        <button id="levelBtn">Re-level</button>
+        <button id="startBtn" class="accent">Start / Resume</button>
+        <button id="menuBtn">Menu</button>
+      </div>
+    </section>
+    <section id="right">
+      <button id="fireBtn" aria-label="Fire lasers"><span>FIRE</span></button>
+    </section>
+  </div>
+
+  <!-- shown in portrait once the controller is running -->
+  <div id="rotate" class="overlay">
+    <div class="phoneicon"></div>
+    <p>Turn your phone sideways</p>
+    <p class="note">The controller works in landscape. If it doesn't rotate, turn off the phone's rotation lock.</p>
+  </div>
+
+  <!-- first tap: needed for motion-sensor permission, fullscreen + landscape lock and keep-awake -->
+  <div id="gate" class="overlay">
+    <div class="card">
+      <h1>SKY RINGS</h1>
+      <p>Phone controller for game <b id="gateCode"></b></p>
+      <button id="gateBtn" class="accent big">Tap to start controller</button>
+      <p class="note">Hold the phone sideways. Tilt it to bank and pitch the plane, keep it level to fly level, and press FIRE to shoot.</p>
+      <p class="note" id="gateHint"></p>
+      <p class="note err" id="gateErr"></p>
+    </div>
+  </div>
+
+  <!-- calibration wizard -->
+  <div id="cal" class="overlay hidden">
+    <div class="card calcard">
+      <div class="calside">
+        <div class="steps"><span data-step="0">1</span><span data-step="1">2</span><span data-step="2">3</span></div>
+        <canvas id="calHorizon" width="160" height="160"></canvas>
+      </div>
+      <div class="calmain">
+        <h2 id="calTitle"></h2>
+        <p id="calDesc"></p>
+        <p class="note" id="calMsg"></p>
+        <div class="row">
+          <button id="calCancel">Cancel</button>
+          <button id="calSet" class="accent big">Set</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/controller.js"></script>
+</body>
+</html>
