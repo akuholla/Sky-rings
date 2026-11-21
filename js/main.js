@@ -1,0 +1,398 @@
+import * as THREE from 'three';
+import { Sky } from 'three/addons/objects/Sky.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { createSceneDef, World, SCENE_LIST } from './world.js';
+import { FlightModel } from './flight.js';
+import { buildAircraft } from './aircraft.js';
+import { Course } from './course.js';
+import { Clouds } from './clouds.js';
+import { Trail, Explosion } from './effects.js';
+import { Hud } from './hud.js';
+
+// ---------------------------------------------------------------------------
+// Renderer, camera, post-processing
+// ---------------------------------------------------------------------------
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+const pixelRatio = Math.min(window.devicePixelRatio, 1.5);
+renderer.setPixelRatio(pixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 1.5, 24000);
+
+const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 }));
+composer.setPixelRatio(pixelRatio);
+composer.setSize(innerWidth, innerHeight);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.3, 0.5, 0.92);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+});
+
+// ---------------------------------------------------------------------------
+// Sky, sun, ambient light, environment
+// ---------------------------------------------------------------------------
+// Sky with a warm colour grade: lifts reds, mutes the blue-grey zenith
+function makeSky() {
+  const s = new Sky();
+  s.material.uniforms.tint = { value: new THREE.Vector3(1, 1, 1) };
+  s.material.fragmentShader = s.material.fragmentShader
+    .replace('void main() {', 'uniform vec3 tint;\nvoid main() {')
+    .replace('gl_FragColor = vec4( retColor, 1.0 );',
+      'float lum = dot(retColor, vec3(0.3, 0.55, 0.15));\n' +
+      'retColor = mix(vec3(lum), retColor, 1.25) * tint;\n' +
+      'gl_FragColor = vec4( retColor, 1.0 );');
+  return s;
+}
+const sky = makeSky();
+sky.scale.setScalar(20000);
+scene.add(sky);
+const sunLight = new THREE.DirectionalLight(0xffffff, 3);
+scene.add(sunLight, sunLight.target);
+const hemi = new THREE.HemisphereLight(0xffffff, 0x000000, 1);
+scene.add(hemi);
+const pmrem = new THREE.PMREMGenerator(renderer);
+let envRT = null;
+let baseFog = 0.0002;
+
+function setSkyUniforms(s, def, sunDir) {
+  const u = s.material.uniforms;
+  u.turbidity.value = def.sky.turbidity;
+  u.rayleigh.value = def.sky.rayleigh;
+  u.mieCoefficient.value = def.sky.mie;
+  u.mieDirectionalG.value = def.sky.mieG;
+  u.sunPosition.value.copy(sunDir);
+  u.tint.value.fromArray(def.sky.tint || [1.25, 0.82, 0.6]);
+}
+
+function applyLook(def) {
+  const sunDir = new THREE.Vector3().setFromSphericalCoords(
+    1, THREE.MathUtils.degToRad(90 - def.sun.elevation), THREE.MathUtils.degToRad(def.sun.azimuth));
+  setSkyUniforms(sky, def, sunDir);
+  sunLight.color.set(def.sun.color);
+  sunLight.intensity = def.sun.intensity;
+  sunLight.position.copy(sunDir).multiplyScalar(1000);
+  hemi.color.set(def.hemi.sky);
+  hemi.groundColor.set(def.hemi.ground);
+  hemi.intensity = def.hemi.intensity;
+  baseFog = def.fog.density;
+  scene.fog = new THREE.FogExp2(def.fog.color, baseFog);
+  renderer.toneMappingExposure = def.exposure;
+
+  // Reflections (water, plane, rings) come from a pre-filtered copy of the sky
+  const envScene = new THREE.Scene();
+  const envSky = makeSky();
+  envSky.scale.setScalar(50);
+  setSkyUniforms(envSky, def, sunDir);
+  envScene.add(envSky);
+  if (envRT) envRT.dispose();
+  envRT = pmrem.fromScene(envScene, 0.02);
+  envSky.geometry.dispose(); envSky.material.dispose();
+  scene.environment = envRT.texture;
+  scene.environmentIntensity = 0.6;
+}
+
+// ---------------------------------------------------------------------------
+// Game objects
+// ---------------------------------------------------------------------------
+const hud = new Hud();
+const flight = new FlightModel();
+const plane = buildAircraft();
+scene.add(plane.group);
+const trails = [new Trail(scene), new Trail(scene)];
+const explosion = new Explosion(scene);
+
+let def = null, world = null, course = null, clouds = null;
+let currentScene = null;
+const stats = { score: 0, time: 0, rings: 0, streak: 0 };
+
+const SETTINGS_KEY = 'skyrings.settings';
+const settings = Object.assign({ scene: 'mountains', invert: false, autoLevel: true },
+  JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'));
+const saveSettings = () => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+
+function headingDir(h) { return new THREE.Vector3(Math.sin(h), 0, -Math.cos(h)); }
+
+// Find a start spot with a low, clear corridor ahead (e.g. over water / along a valley)
+function findStart(w) {
+  let best = null;
+  for (let k = 0; k < 40; k++) {
+    const x = k * 650, z = 0;
+    let m = -Infinity;
+    for (let s = 0; s <= 1600; s += 200) {
+      for (const o of [-60, 0, 60]) m = Math.max(m, w.solidAt(x + o, z - s));
+    }
+    if (!best || m < best.m) best = { x, z, m };
+    if (m < 40) break;
+  }
+  return { pos: new THREE.Vector3(best.x, best.m + w.def.clearance + 70, best.z), heading: 0 };
+}
+
+function resetStats() {
+  stats.score = 0; stats.time = 0; stats.rings = 0; stats.streak = 0;
+}
+
+function loadScene(id) {
+  if (world) { course.dispose(); clouds.dispose(); world.dispose(); }
+  currentScene = id;
+  def = createSceneDef(id);
+  applyLook(def);
+  world = new World(scene, def);
+  const start = findStart(world);
+  world.init(start.pos.x, start.pos.z);
+  clouds = new Clouds(scene, world);
+  clouds.initAmbient(start.pos);
+  course = new Course(scene, world, clouds);
+  course.reset(start.pos, start.heading);
+  respawnAt(start.pos, headingDir(start.heading));
+  resetStats();
+  explosion.parts.forEach((p) => { explosion.group.remove(p.s); p.s.material.dispose(); });
+  explosion.parts.length = 0;
+}
+
+// ---------------------------------------------------------------------------
+// Input
+// ---------------------------------------------------------------------------
+const keys = {};
+addEventListener('keydown', (e) => {
+  if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+  keys[e.code] = true;
+  if (e.code === 'Escape' || e.code === 'KeyP') {
+    if (state === 'menu') { if (started) closeMenu(); } else openMenu();
+  } else if (e.code === 'Enter' && state === 'menu') {
+    closeMenu();
+  }
+});
+addEventListener('keyup', (e) => { keys[e.code] = false; });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+function readInput() {
+  const roll = (keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0);
+  let pitch = (keys.ArrowUp || keys.KeyW ? 1 : 0) - (keys.ArrowDown || keys.KeyS ? 1 : 0);
+  if (settings.invert) pitch = -pitch;
+  return { roll, pitch };
+}
+
+// ---------------------------------------------------------------------------
+// Menu
+// ---------------------------------------------------------------------------
+let state = 'menu';
+let started = false;
+const menuEl = document.getElementById('menu');
+const startBtn = document.getElementById('start');
+const sceneBox = document.getElementById('scenes');
+const optInvert = document.getElementById('optInvert');
+const optLevel = document.getElementById('optLevel');
+
+for (const s of SCENE_LIST) {
+  const b = document.createElement('button');
+  b.className = 'scene';
+  b.dataset.scene = s.id;
+  b.textContent = s.label;
+  b.addEventListener('click', () => {
+    if (s.id !== currentScene) {
+      settings.scene = s.id; saveSettings();
+      loadScene(s.id);
+      started = false;
+      refreshMenu();
+    }
+  });
+  sceneBox.appendChild(b);
+}
+optInvert.checked = settings.invert;
+optLevel.checked = settings.autoLevel;
+optInvert.addEventListener('change', () => { settings.invert = optInvert.checked; saveSettings(); });
+optLevel.addEventListener('change', () => { settings.autoLevel = optLevel.checked; saveSettings(); });
+startBtn.addEventListener('click', () => closeMenu());
+
+function refreshMenu() {
+  for (const b of sceneBox.children) b.classList.toggle('active', b.dataset.scene === currentScene);
+  startBtn.textContent = started ? 'Resume' : 'Start Flying';
+}
+function openMenu() {
+  if (state === 'crashed') finishCrash();
+  state = 'menu';
+  menuEl.classList.remove('hidden');
+  hud.show(false);
+  refreshMenu();
+}
+function closeMenu() {
+  menuEl.classList.add('hidden');
+  hud.show(true);
+  state = 'playing';
+  started = true;
+  startBtn.blur();
+}
+
+// ---------------------------------------------------------------------------
+// Gameplay
+// ---------------------------------------------------------------------------
+const prevPos = new THREE.Vector3();
+const camQuat = new THREE.Quaternion();
+const CAM_OFF = new THREE.Vector3(0, 4.2, 17);
+const _t = new THREE.Vector3(), _u = new THREE.Vector3(), _w = new THREE.Vector3();
+let crashT = 0, shake = 0, cloudF = 0, menuAngle = 0;
+const crashPos = new THREE.Vector3();
+
+function respawnAt(pos, dir) {
+  flight.reset(pos, dir);
+  plane.group.visible = true;
+  trails.forEach((t) => t.reset());
+  camQuat.copy(flight.quat);
+}
+
+function checkCollision() {
+  const p = flight.pos;
+  if (p.y - 0.8 < world.solidAt(p.x, p.z)) return true;
+  for (const s of [-1, 1]) {
+    _t.copy(flight.right).multiplyScalar(5.6 * s).add(p);
+    if (_t.y < world.solidAt(_t.x, _t.z)) return true;
+  }
+  _t.copy(flight.forward).multiplyScalar(3.5).add(p);
+  return _t.y < world.solidAt(_t.x, _t.z);
+}
+
+function crash() {
+  state = 'crashed';
+  crashT = 2.4;
+  shake = 1;
+  crashPos.copy(flight.pos);
+  plane.group.visible = false;
+  explosion.spawn(flight.pos, flight.vel);
+  hud.flash();
+  hud.showCrash(true);
+  resetStats();
+}
+
+function finishCrash() {
+  const r = course.respawnPoint();
+  respawnAt(r.pos, r.dir);
+  hud.showCrash(false);
+  state = 'playing';
+}
+
+function stepPlaying(dt) {
+  prevPos.copy(flight.pos);
+  flight.update(dt, readInput(), { autoLevel: settings.autoLevel });
+  stats.time += dt;
+  for (const ev of course.update(prevPos, flight.pos)) {
+    if (ev.type === 'pass') {
+      stats.streak++;
+      stats.rings++;
+      const pts = 100 + 25 * Math.min(stats.streak - 1, 20);
+      stats.score += pts;
+      hud.popup('+' + pts + (stats.streak > 1 ? `  streak x${stats.streak}` : ''), 'good');
+    } else {
+      stats.streak = 0;
+      hud.popup('MISSED', 'bad');
+    }
+  }
+  if (checkCollision()) crash();
+}
+
+function updateCamera(dt) {
+  if (state === 'menu') {
+    menuAngle += dt * 0.12;
+    camera.position.set(
+      flight.pos.x + Math.sin(menuAngle) * 28, flight.pos.y + 7, flight.pos.z + Math.cos(menuAngle) * 28);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(flight.pos);
+  } else if (state === 'crashed') {
+    camera.up.set(0, 1, 0);
+    camera.lookAt(crashPos);
+  } else {
+    camQuat.slerp(flight.quat, 1 - Math.exp(-dt * 3.5));
+    _t.copy(CAM_OFF).applyQuaternion(camQuat);
+    camera.position.copy(flight.pos).add(_t);
+    const g = world.solidAt(camera.position.x, camera.position.z) + 3;
+    if (camera.position.y < g) camera.position.y = g;
+    _u.set(0, 1, 0).applyQuaternion(camQuat);
+    camera.up.set(0, 1, 0).lerp(_u, 0.45).normalize();
+    _w.set(0, 1.2, -30).applyQuaternion(camQuat).add(flight.pos);
+    camera.lookAt(_w);
+  }
+  if (shake > 0) {
+    camera.position.x += (Math.random() - 0.5) * shake * 2;
+    camera.position.y += (Math.random() - 0.5) * shake * 2;
+    shake = Math.max(0, shake - dt * 1.2);
+  }
+  const fov = 62 + (flight.speed - 72) * 0.18;
+  if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  camera.updateMatrixWorld();
+  sky.position.copy(camera.position);
+}
+
+// ---------------------------------------------------------------------------
+// Main loop
+// ---------------------------------------------------------------------------
+let lastT = performance.now(), elapsed = 0;
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, (now - lastT) / 1000);
+  lastT = now;
+  elapsed += dt;
+
+  if (state === 'playing') stepPlaying(dt);
+  else if (state === 'crashed') {
+    crashT -= dt;
+    if (crashT <= 0) finishCrash();
+  }
+
+  world.update(dt, flight.pos.x, flight.pos.z);
+  course.animate(dt, elapsed);
+  explosion.update(dt);
+
+  // aircraft visuals
+  plane.group.position.copy(flight.pos);
+  plane.group.quaternion.copy(flight.quat);
+  plane.propeller.rotation.z += dt * 55;
+  plane.group.updateMatrixWorld();
+  if (state === 'playing') {
+    const strength = 0.45 * THREE.MathUtils.smoothstep(Math.abs(flight.pitchRate) / 0.6 + Math.abs(flight.bank) / 1.2, 0.3, 1.0);
+    for (let i = 0; i < 2; i++) {
+      _t.copy(plane.tips[i]);
+      plane.group.localToWorld(_t);
+      trails[i].update(dt, _t, flight.up, strength);
+    }
+  }
+
+  // clouds: thicker fog + white-out overlay while inside one
+  const f = clouds.update(flight.pos, flight.forward);
+  cloudF += (f - cloudF) * (1 - Math.exp(-dt * 6));
+  scene.fog.density = baseFog + cloudF * 0.006;
+  hud.setCloud(state === 'menu' ? 0 : cloudF);
+
+  updateCamera(dt);
+
+  if (state !== 'menu') {
+    hud.setStats(stats);
+    hud.setFlight(flight.speed, flight.pos.y - world.surfaceAt(flight.pos.x, flight.pos.z));
+    const r = course.nextRing();
+    hud.updateMarker(camera, r && r.pos, flight.pos);
+  }
+
+  composer.render();
+}
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+loadScene(SCENE_LIST.some((s) => s.id === settings.scene) ? settings.scene : 'mountains');
+refreshMenu();
+document.getElementById('loading')?.remove();
+requestAnimationFrame((t) => { lastT = t; frame(t); });
+
+// handy for debugging from the console
+window.__sim = { flight, get course() { return course; }, get world() { return world; }, get state() { return state; }, get lastT() { return lastT; }, stats, settings };

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sky Rings — Flight Sim</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="cloudfog"></div>
+  <div id="flash"></div>
+  <div id="loading">Loading…</div>
+
+  <div id="hud" class="hidden">
+    <div id="topbar">
+      <div class="stat"><span class="label">Score</span><span class="value" id="score">0000</span></div>
+      <div class="stat"><span class="label">Time</span><span class="value" id="time">00:00</span></div>
+      <div class="stat"><span class="label">Rings</span><span class="value" id="rings">00</span></div>
+      <div class="stat"><span class="label">Streak</span><span class="value" id="streak">x0</span></div>
+    </div>
+    <div id="popup"></div>
+    <div id="marker"><div id="markerArrow"></div><div id="markerDist"></div></div>
+    <div id="flightinfo">
+      <div><span class="label">SPD</span> <span id="spd">0</span> km/h</div>
+      <div><span class="label">ALT</span> <span id="alt">0</span> m</div>
+    </div>
+    <div id="help">← → roll &nbsp;·&nbsp; ↑ ↓ pitch &nbsp;·&nbsp; Esc menu</div>
+  </div>
+
+  <div id="crash" class="hidden">
+    <h1>CRASHED</h1>
+    <p>Score reset — respawning…</p>
+  </div>
+
+  <div id="menu">
+    <div class="panel">
+      <h1>SKY RINGS</h1>
+      <p class="sub">Fly through the golden rings. Don't hit the ground.</p>
+      <h3>Scene</h3>
+      <div id="scenes"></div>
+      <h3>Options</h3>
+      <label class="opt"><input type="checkbox" id="optInvert" /> Invert pitch (↑ = nose down)</label>
+      <label class="opt"><input type="checkbox" id="optLevel" checked /> Auto-level wings when no key is held</label>
+      <button id="start">Start Flying</button>
+      <div class="keys">
+        <span><kbd>←</kbd><kbd>→</kbd> roll / bank to turn</span>
+        <span><kbd>↑</kbd><kbd>↓</kbd> pitch</span>
+        <span><kbd>Esc</kbd> menu</span>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
