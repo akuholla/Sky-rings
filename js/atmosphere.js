@@ -450,8 +450,12 @@ export class Atmosphere {
     if (this.flash > 0 || prev > 0) {
       const f = this.flash;
       setSkyUniforms(this.sky, this.look, 1 + f * 5);
-      this.hemi.intensity = this.look.hemi.intensity + f * 3;
       if (this.flashEl) this.flashEl.style.opacity = (f * 0.22).toFixed(3);
     }
+    // inside a tunnel (shade -> 1) the sun, sky light and reflections fade out
+    const sh = this.shade || 0;
+    this.light.intensity = this.look.light.intensity * (1 - 0.85 * sh);
+    this.hemi.intensity = this.look.hemi.intensity * (1 - 0.45 * sh) + this.flash * 3;
+    this.scene.environmentIntensity = this.look.envIntensity * (1 - 0.7 * sh);
   }
 }

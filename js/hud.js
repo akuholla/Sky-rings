@@ -3,12 +3,14 @@ import * as THREE from 'three';
 
 const $ = (id) => document.getElementById(id);
 const _v = new THREE.Vector3(), _p = new THREE.Vector3();
+export const fmtLap = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
 
 export class Hud {
   constructor() {
     this.el = $('hud');
     this.score = $('score'); this.time = $('time'); this.rings = $('rings'); this.streak = $('streak'); this.kills = $('kills');
     this.fuelEl = $('fuel'); this.fuelFill = $('fuelFill'); this.fuelPct = $('fuelPct'); this.fuelWarn = $('fuelWarn');
+    this.lapEls = document.querySelectorAll('.lapstat'); this.lap = $('lap'); this.lapTime = $('lapTime'); this.bestLap = $('bestLap');
     this.reticle = $('reticle'); this.markerBox = $('enemyMarkers'); this.enemyEls = [];
     this.spd = $('spd'); this.alt = $('alt');
     this.marker = $('marker'); this.arrow = $('markerArrow'); this.dist = $('markerDist');
@@ -66,6 +68,14 @@ export class Hud {
     this.marker.classList.toggle('edge', !onScreen);
     this.arrow.style.transform = onScreen ? 'rotate(45deg)' : `rotate(${Math.atan2(-y, x)}rad)`;
     this._set(this.dist, 'dist', Math.round(from.distanceTo(target)) + ' m');
+  }
+
+  // circuit lap counter: lap number, current lap time, best lap
+  showLaps(v) { for (const el of this.lapEls) el.classList.toggle('hidden', !v); }
+  setLap(lap) {
+    this._set(this.lap, 'lap', lap.started ? String(lap.n) : '–');
+    this._set(this.lapTime, 'lapTime', fmtLap(lap.t));
+    this._set(this.bestLap, 'bestLap', lap.best ? fmtLap(lap.best) : '–');
   }
 
   setFuel(pct, engineOn) {

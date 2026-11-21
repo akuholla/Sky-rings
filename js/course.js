@@ -27,6 +27,17 @@ export class Course {
   reset(start, heading) {
     for (const r of this.rings) this._removeRing(r);
     this.rings = []; this.next = 0;
+    this.circuit = this.world.def.circuit || null;
+    if (this.circuit) {
+      // fixed loop: rings evenly spaced, ring k sits at s = k * gap; k % perLap === 0 is the start/finish gate
+      const c = this.circuit;
+      this.perLap = Math.max(8, Math.round(c.L / this.spacing));
+      this.gap = c.L / this.perLap;
+      const s = c.nearest(start.x, start.z).s;
+      this.k = Math.ceil((s + 120) / this.gap);
+      this.ensureAhead();
+      return;
+    }
     this.pts = [start.clone()];
     this.heading = heading; this.phase = this.rnd() * 6; this.altPhase = this.rnd() * 6;
     this.ensureAhead();
@@ -81,6 +92,13 @@ export class Course {
   }
 
   ensureAhead() {
+    if (this.circuit) {
+      while (this.rings.length - this.next < AHEAD) {
+        const k = this.k++, s = this.circuit.wrap(k * this.gap);
+        this._createRing(this.circuit.pointAt(s), this.circuit.tangentAt(s), null, { k, s, finish: k % this.perLap === 0 });
+      }
+      return;
+    }
     while (this.rings.length - this.next < AHEAD) {
       this._genPoint();
       const n = this.pts.length;
@@ -93,13 +111,15 @@ export class Course {
     }
   }
 
-  _createRing(pos, tan, prev) {
+  _createRing(pos, tan, prev, meta = {}) {
     const mat = this.baseMat.clone();
+    if (meta.finish) { mat.color.set(0xf4f6ff); mat.emissive.set(0x4fc3ff); } // start/finish ring
     const mesh = new THREE.Mesh(this.geo, mat);
     mesh.position.copy(pos);
     mesh.lookAt(_c.copy(pos).add(tan));
     this.group.add(mesh);
-    this.rings.push({ pos, tan, mesh, state: 'pending', t: 0 });
+    this.rings.push({ pos, tan, mesh, state: 'pending', t: 0, ...meta });
+    if (!prev) return;
 
     // sometimes put a cloud bank across the path so you fly through it
     // (keep the opening stretch clear so the first rings are easy to see)
@@ -177,6 +197,10 @@ export class Course {
   // Where to put the plane after a crash: on the approach to the next ring
   respawnPoint() {
     const r = this.rings[this.next];
+    if (this.circuit) { // back along the route, so tunnels and canyon walls are never in the way
+      const s = this.circuit.wrap(r.s - 160);
+      return { pos: this.circuit.pointAt(s), dir: this.circuit.tangentAt(s) };
+    }
     const pos = r.pos.clone().addScaledVector(r.tan, -240);
     pos.y = Math.max(pos.y, this.world.solidAt(pos.x, pos.z) + 60);
     const dir = r.pos.clone().sub(pos).normalize();

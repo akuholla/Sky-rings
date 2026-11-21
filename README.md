@@ -1,6 +1,6 @@
 # Sky Rings — a browser flight game
 
-Fly a low-poly biplane through endless winding courses of golden rings, shoot down enemy planes and hot-air balloons, and keep your fuel topped up. You can fly over mountains, a skyscraper city, forests or islands, at four times of day and in three kinds of weather. Fly with the keyboard, or pair your phone and tilt it like a yoke.
+Fly a low-poly biplane through endless winding courses of golden rings, shoot down enemy planes and hot-air balloons, and keep your fuel topped up. You can fly over mountains, a skyscraper city, forests or islands, or race laps of the low-level Canyon Circuit, at four times of day and in three kinds of weather. Fly with the keyboard, or pair your phone and tilt it like a yoke.
 
 Built with [three.js](https://threejs.org/). There's no build step, and the only thing to install is Python 3.
 
@@ -10,7 +10,8 @@ Built with [three.js](https://threejs.org/). There's no build step, and the only
 
 - **Arcade-realistic flight model.** You bank to turn, climbs cost speed and dives add it, and the flight path lags the nose slightly so turns feel weighty. An optional auto-level assist rolls the wings back to level when you let go.
 - **Endless ring courses.** A curvy path of gold rings is generated ahead of you. It follows valleys and always clears the terrain and buildings. The first ring is right in front of you, and the spacing between rings is adjustable.
-- **4 scenes:** Sunset Mountains (cliffs around a bay), Skyscraper City (procedural blocks with lit windows), Forest Hills (instanced pine trees and lakes) and Island Sea.
+- **4 open-world scenes:** Sunset Mountains (cliffs around a bay), Skyscraper City (procedural blocks with lit windows), Forest Hills (instanced pine trees and lakes) and Island Sea.
+- **Canyon Circuit:** a closed, low-altitude race loop through a forest, over a lake, down a town's main street, then into a red-rock canyon with natural tunnels and a natural stone bridge. It has lap times and a best-lap record.
 - **4 times of day:** sunrise, midday, sunset and night (stars, moon and glowing city windows).
 - **3 kinds of weather:** clear, thunder and rain (lightning bolts, thunder, rain streaks and low storm clouds), and snow (falling flakes and snow-covered ground, trees and roofs).
 - **Volumetric-looking clouds** you can fly through. They have lit tops, shadowed bases and a glow on their edges when you look toward the sun.
@@ -27,6 +28,13 @@ Built with [three.js](https://threejs.org/). There's no build step, and the only
 | ![Menu](docs/screenshots/menu.jpg) **Menu:** scene, time of day, weather and options | ![Combat](docs/screenshots/combat.jpg) **Combat:** balloons, enemy planes and lasers |
 | ![Night storm over the city](docs/screenshots/city-night-storm.jpg) **Night thunderstorm** over the city | ![Snowy forest](docs/screenshots/forest-snow.jpg) **Snow** over the forest at midday |
 | ![Islands at sunrise](docs/screenshots/islands-sunrise.jpg) **Island Sea** at sunrise | ![Phone pairing](docs/screenshots/phone-pairing.jpg) **Pairing a phone** with a QR code |
+
+**Canyon Circuit**
+
+| | |
+|---|---|
+| ![Start/finish gate](docs/screenshots/circuit-start.jpg) **Start/finish gate** in the forest | ![Town street](docs/screenshots/circuit-town.jpg) **Down the main street** of the town |
+| ![Tunnel entrance](docs/screenshots/circuit-tunnel.jpg) **Into a natural tunnel** in the canyon | ![Natural bridge](docs/screenshots/circuit-bridge.jpg) **Under the natural stone bridge** |
 
 **Phone controller.** The live tilt dial, sensitivity setting and FIRE button, plus the 3-step calibration wizard:
 
@@ -62,9 +70,26 @@ Then open **http://localhost:8137** in a desktop browser (Chrome, Edge, Brave, F
 - **Enemies:** red brackets mark enemy planes, which take 2 hits and are worth 300 points. Orange circles mark balloons, which take 1 hit and are worth 150. Aim with the cyan crosshair.
 - **Crashing:** hitting the ground, water, a building, a tree or an enemy resets your score. You respawn just before the next ring with a full tank.
 
+### Canyon Circuit
+
+Pick **Canyon Circuit** in the menu's Scene list. It's a fixed loop of about 8.5 km, roughly 2 minutes per lap at cruise speed:
+
+1. **Forest:** the start/finish gate, then a clearing through the pines.
+2. **Lake:** 14 m above the water, weaving past rock stacks.
+3. **Town:** down the main street between the buildings.
+4. **Canyon:** red-rock walls, two natural tunnels (dark inside, lit by lamps), rock spires, and a natural stone bridge to fly under.
+5. **Descent:** back down to the forest and the gate.
+
+Rings mark the route, and the **white-blue ring is the start/finish line**. The lap timer starts when you first pass through it. Each later pass completes a lap, and your best lap is saved in the browser. The top bar shows **Lap**, **Lap time** and **Best**.
+
+- **Ring spacing** sets how many rings there are per lap (fuel still works the same way).
+- **Lasers** still work, but there are no enemy planes or balloons on the circuit.
+- **Crashing** resets your score but not your lap timer, so a crash costs you time. You respawn on the route just before the next ring.
+- Time of day and weather apply here too; a night thunderstorm in the canyon is a good challenge.
+
 ### Menu options
 
-- **Scene / Time of day / Weather:** any combination works. Changing one starts a fresh run.
+- **Scene / Time of day / Weather:** any combination works. Changing one starts a fresh run. The scenes are Sunset Mountains, Skyscraper City, Forest Hills, Island Sea and Canyon Circuit.
 - **Invert pitch:** makes ↑ point the nose down, like a real flight stick.
 - **Auto-level wings:** rolls the wings back to level when no roll key is held.
 - **Enemies & lasers:** turn this off for a pure ring run.
@@ -105,6 +130,7 @@ js/
   flight.js      flight model (FLIGHT_PARAMS holds the tuning numbers)
   aircraft.js    low-poly biplane (player and enemy colours)
   world.js       scene definitions, streaming terrain, water shader, city and forest
+  circuit.js     Canyon Circuit: route, baked terrain, tunnels, natural bridge, town, rocks, gate
   atmosphere.js  time-of-day and weather presets, sky, moon, stars, rain, snow, lightning
   clouds.js      instanced billboard clouds with procedural texture and shading
   course.js      ring path generation and ring pass/miss detection

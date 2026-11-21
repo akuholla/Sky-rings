@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeNoise2D, fbm, ridged, hash2, smoothstep, mulberry32 } from './noise.js';
+import { circuitDef, StaticTerrain, CircuitObstacles } from './circuit.js';
 
 const lerp = (a, b, t) => a + (b - a) * t;
 function mixInto(o, a, b, t) {
@@ -18,6 +19,7 @@ export const SCENE_LIST = [
   { id: 'city', label: 'Skyscraper City' },
   { id: 'forest', label: 'Forest Hills' },
   { id: 'islands', label: 'Island Sea' },
+  { id: 'circuit', label: 'Canyon Circuit' },
 ];
 
 export function createSceneDef(id) {
@@ -25,6 +27,7 @@ export function createSceneDef(id) {
     case 'city': return cityDef();
     case 'forest': return forestDef();
     case 'islands': return islandsDef();
+    case 'circuit': return circuitDef();
     default: return mountainsDef();
   }
 }
@@ -348,12 +351,12 @@ const _yAxis = new THREE.Vector3(0, 1, 0), _c = new THREE.Color();
 const BLOCK = 120, STREET = 30, CITY_CHUNK_BLOCKS = 4;
 const BUILDING_PALETTE = [0x8a8f99, 0x6d7380, 0xa59a8c, 0x4f5866, 0x9aa3ad, 0x5d6470, 0xb3a58f];
 
-function makeBuildingMaterial(env) {
+export function makeBuildingMaterial(env) {
   env = { windowLit: 0.7, windowGlow: 1.6, snow: false, ...env };
   const f = (v) => v.toFixed(3);
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.65, metalness: 0.2 });
   // shader text depends on env, so give each variant its own program cache key
-  mat.customProgramCacheKey = () => `bld-${f(env.windowLit)}-${f(env.windowGlow)}-${env.snow ? 1 : 0}`;
+  mat.customProgramCacheKey = () => `bld2-${f(env.windowLit)}-${f(env.windowGlow)}-${env.snow ? 1 : 0}`;
   mat.onBeforeCompile = (sh) => {
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vBPos;\nvarying vec3 vBNrm;\nvarying float vBSeed;')
@@ -366,7 +369,12 @@ function makeBuildingMaterial(env) {
           vBSeed = 0.0;
         #endif
         vBPos = (modelMatrix * bwp).xyz;
-        vBNrm = objectNormal;`);
+        // world-space face normal, so windows line up on rotated buildings too
+        #ifdef USE_INSTANCING
+          vBNrm = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * objectNormal);
+        #else
+          vBNrm = normalize(mat3(modelMatrix) * objectNormal);
+        #endif`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
         varying vec3 vBPos; varying vec3 vBNrm; varying float vBSeed;
@@ -375,7 +383,8 @@ function makeBuildingMaterial(env) {
         {
           float isRoof = step(0.5, vBNrm.y);
           float isWall = 1.0 - step(0.5, abs(vBNrm.y));
-          float u = (abs(vBNrm.x) > 0.5 ? vBPos.z : vBPos.x) / 4.0;
+          vec3 bt = vec3(-vBNrm.z, 0.0, vBNrm.x); // horizontal direction across the wall
+          float u = dot(vBPos, bt) / max(length(bt), 1e-3) / 4.0;
           float v = vBPos.y / 3.6;
           vec2 cell = floor(vec2(u, v));
           vec2 f = fract(vec2(u, v));
@@ -466,7 +475,7 @@ const TCELL = 20, FCHUNK = 400;
 
 const WHITE = new THREE.Color(0xe8ecf2);
 
-class Forest {
+export class Forest {
   constructor(def, env) {
     this.def = def; this.snow = !!env.snow;
     this.noise = makeNoise2D(606);
@@ -483,8 +492,8 @@ class Forest {
     const z = (cj + 0.15 + 0.7 * hash2(ci, cj, 12)) * TCELL;
     const dens = this.noise(x * 0.0011, z * 0.0011) * 0.5 + 0.5;
     if (hash2(ci, cj, 13) > dens * 1.3 - 0.1) return null;
-    const g = this.def.height(x, z);
-    if (g < 3) return null;
+    const g = this.def.treeGround ? this.def.treeGround(x, z) : this.def.height(x, z);
+    if (g == null || g < 3) return null;
     const h = 11 + hash2(ci, cj, 14) * 16;
     return { x, z, g, h, r: h * (0.22 + hash2(ci, cj, 15) * 0.08), ci, cj };
   }
@@ -533,11 +542,14 @@ export class World {
     this.env = env;
     this.group = new THREE.Group();
     scene.add(this.group);
-    this.terrain = new Terrain(def, env);
+    this.terrain = def.circuit ? new StaticTerrain(def, env) : new Terrain(def, env);
     this.group.add(this.terrain.mesh);
     this.water = def.waterLevel != null ? new Water(def.waterLevel, def.waterColor, env) : null;
     if (this.water) this.group.add(this.water.mesh);
-    this.obstacles = def.obstacles === 'city' ? new City(env) : def.obstacles === 'forest' ? new Forest(def, env) : null;
+    this.obstacles = def.obstacles === 'city' ? new City(env)
+      : def.obstacles === 'forest' ? new Forest(def, env)
+      : def.obstacles === 'circuit' ? new CircuitObstacles(def, env, { Forest, makeBuildingMaterial })
+      : null;
     if (this.obstacles) this.group.add(this.obstacles.group);
   }
   init(x, z) {
@@ -559,6 +571,15 @@ export class World {
   solidAt(x, z) {
     const s = this.surfaceAt(x, z);
     return this.obstacles ? Math.max(s, this.obstacles.topAt(x, z)) : s;
+  }
+  // Does point p touch anything solid? Covers overhangs (tunnel roofs, arches) too.
+  hitTest(p) {
+    if (p.y < this.solidAt(p.x, p.z)) return true;
+    return !!(this.obstacles && this.obstacles.hitTest && this.obstacles.hitTest(p));
+  }
+  // 0..1: how enclosed the point is (inside a tunnel), used to dim the lighting
+  shadeAt(p) {
+    return this.obstacles && this.obstacles.shadeAt ? this.obstacles.shadeAt(p) : 0;
   }
   dispose() {
     this.scene.remove(this.group);

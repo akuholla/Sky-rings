@@ -9,7 +9,7 @@ import { buildAircraft } from './aircraft.js';
 import { Course } from './course.js';
 import { Clouds } from './clouds.js';
 import { Trail, Explosion } from './effects.js';
-import { Hud } from './hud.js';
+import { Hud, fmtLap } from './hud.js';
 import { Atmosphere, buildLook, TIME_LIST, WEATHER_LIST } from './atmosphere.js';
 import { Sound } from './sound.js';
 import { Combat } from './combat.js';
@@ -72,7 +72,11 @@ const stats = { score: 0, time: 0, rings: 0, streak: 0, kills: 0 };
 // Fuel (%): each ring refills 10%; burn rate = 10% per ring-to-ring flight time at cruise
 let fuel = 100;
 const FUEL_PER_RING = 10;
-const fuelBurnRate = () => FUEL_PER_RING / (settings.ringGap / FLIGHT_PARAMS.cruise); // %/s
+const fuelBurnRate = () => FUEL_PER_RING / (((course && course.gap) || settings.ringGap) / FLIGHT_PARAMS.cruise); // %/s
+// circuit laps (timer runs from the first pass of the start/finish gate)
+const BEST_KEY = 'skyrings.bestlap.circuit';
+const lap = { started: false, n: 0, t: 0, best: +localStorage.getItem(BEST_KEY) || 0 };
+let shade = 0;
 
 const SETTINGS_KEY = 'skyrings.settings';
 const settings = Object.assign({ scene: 'mountains', time: 'sunset', weather: 'clear', invert: false, autoLevel: true, sound: true, ringGap: 340, combat: true },
@@ -108,18 +112,26 @@ function loadScene(id) {
   def = createSceneDef(id);
   look = buildLook(def, settings.time, settings.weather);
   atmo.apply(look);
-  planeFill.intensity = look.night ? 120 : look.weatherId === 'storm' ? 60 : 0;
+  planeFill.userData.base = look.night ? 120 : look.weatherId === 'storm' ? 60 : 0;
+  planeFill.intensity = planeFill.userData.base;
   world = new World(scene, def, look.env);
-  const start = findStart(world);
+  const start = def.circuit ? def.circuit.startPose() : findStart(world);
   world.init(start.pos.x, start.pos.z);
-  clouds = new Clouds(scene, world, { ...look.clouds, sunDir: look.lightDir, sunColor: look.light.color });
+  clouds = new Clouds(scene, world, {
+    ...look.clouds, sunDir: look.lightDir, sunColor: look.light.color,
+    ...(def.circuit ? { pathChance: 0 } : {}), // no cloud banks inside canyons and tunnels
+  });
   const [c0, c1] = look.clouds.palette.map((c) => '#' + new THREE.Color(c).getHexString());
   document.getElementById('cloudfog').style.background = `radial-gradient(ellipse at center, ${c0}cc, ${c1}f2)`;
   clouds.initAmbient(start.pos);
   course = new Course(scene, world, clouds, 1234, settings.ringGap);
   course.reset(start.pos, start.heading);
   combat.reset(world, course);
+  combat.allowEnemies = !def.circuit; // the circuit is a race: lasers on, no enemy traffic
   combat.setEnabled(settings.combat);
+  lap.started = false; lap.n = 0; lap.t = 0;
+  hud.showLaps(!!def.circuit);
+  shade = 0;
   respawnAt(start.pos, headingDir(start.heading));
   resetStats();
   explosion.parts.forEach((p) => { explosion.group.remove(p.s); p.s.material.dispose(); });
@@ -286,15 +298,31 @@ function respawnAt(pos, dir) {
   camQuat.copy(flight.quat);
 }
 
+// world.hitTest covers the ground, buildings, trees and overhangs (tunnel roofs, arches)
 function checkCollision() {
   const p = flight.pos;
-  if (p.y - plane.gearDepth < world.solidAt(p.x, p.z)) return true; // wheels touching down
+  _t.set(p.x, p.y - plane.gearDepth, p.z);
+  if (world.hitTest(_t)) return true; // wheels
+  _t.copy(flight.up).multiplyScalar(2.2).add(p);
+  if (world.hitTest(_t)) return true; // top wing
   for (const s of [-1, 1]) {
     _t.copy(flight.right).multiplyScalar(plane.halfSpan * s).add(p);
-    if (_t.y < world.solidAt(_t.x, _t.z)) return true;
+    if (world.hitTest(_t)) return true; // wingtips
   }
   _t.copy(flight.forward).multiplyScalar(3.5).add(p);
-  return _t.y < world.solidAt(_t.x, _t.z);
+  return world.hitTest(_t); // nose
+}
+
+function onFinishLine() {
+  if (!lap.started) {
+    lap.started = true; lap.n = 1; lap.t = 0;
+    hud.popup('GO! LAP 1', 'kill');
+    return;
+  }
+  const t = lap.t, best = !lap.best || t < lap.best;
+  if (best) { lap.best = t; localStorage.setItem(BEST_KEY, String(t)); }
+  hud.popup(`LAP ${lap.n}  ${fmtLap(t)}${best ? '  NEW BEST!' : ''}`, 'kill');
+  lap.n++; lap.t = 0;
 }
 
 function crash() {
@@ -327,7 +355,9 @@ function stepPlaying(dt) {
   if (phone.ready && input.roll === 0 && input.pitch === 0) { input = phone.flightInput(flight); autoLevel = false; }
   flight.update(dt, input, { autoLevel });
   stats.time += dt;
+  if (lap.started) lap.t += dt;
   for (const ev of course.update(prevPos, flight.pos)) {
+    if (def.circuit && ev.ring.finish) onFinishLine();
     if (ev.type === 'pass') {
       stats.streak++;
       stats.rings++;
@@ -372,6 +402,8 @@ function updateCamera(dt) {
     camera.position.copy(flight.pos).add(_t);
     const g = world.solidAt(camera.position.x, camera.position.z) + 3;
     if (camera.position.y < g) camera.position.y = g;
+    // never let the chase camera end up inside rock (tunnel walls, arches, buildings)
+    for (let k = 0; k < 6 && world.hitTest(camera.position); k++) camera.position.lerp(flight.pos, 0.35);
     _u.set(0, 1, 0).applyQuaternion(camQuat);
     camera.up.set(0, 1, 0).lerp(_u, 0.45).normalize();
     _w.set(0, 1.2, -30).applyQuaternion(camQuat).add(flight.pos);
@@ -431,6 +463,9 @@ function frame(now) {
   hud.setCloud(state === 'menu' ? 0 : cloudF);
 
   updateCamera(dt);
+  shade += (world.shadeAt(flight.pos) - shade) * (1 - Math.exp(-dt * 4));
+  atmo.shade = shade;
+  planeFill.intensity = planeFill.userData.base + shade * 160; // the plane stays readable inside tunnels
   atmo.update(dt, camera, flight.vel, flight.forward, world);
   clouds.render(camera.position);
   plane.strobe.visible = (elapsed % 1.2) < 0.08;
@@ -439,6 +474,7 @@ function frame(now) {
     hud.setStats(stats);
     hud.setFlight(flight.speed, flight.pos.y - world.surfaceAt(flight.pos.x, flight.pos.z));
     hud.setFuel(fuel, flight.engineOn);
+    if (def.circuit) hud.setLap(lap);
     const r = course.nextRing();
     hud.updateMarker(camera, r && r.pos, flight.pos);
     const aim = combat.enabled && state === 'playing' ? _w.copy(flight.forward).multiplyScalar(350).add(flight.pos) : null;
@@ -462,4 +498,4 @@ document.getElementById('loading')?.remove();
 requestAnimationFrame((t) => { lastT = t; frame(t); });
 
 // handy for debugging from the console
-window.__sim = { flight, get course() { return course; }, get world() { return world; }, get state() { return state; }, get lastT() { return lastT; }, get look() { return look; }, atmo, combat, keys, phone, get fuel() { return fuel; }, set fuel(v) { fuel = v; }, fuelBurnRate, stats, settings };
+window.__sim = { flight, get course() { return course; }, get world() { return world; }, get state() { return state; }, get lastT() { return lastT; }, get look() { return look; }, atmo, combat, keys, phone, get fuel() { return fuel; }, set fuel(v) { fuel = v; }, fuelBurnRate, lap, get def() { return def; }, respawnAt, stats, settings };

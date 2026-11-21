@@ -209,7 +209,7 @@ export class Combat {
     this.player = flight;
 
     // spawn
-    if (active) {
+    if (active && this.allowEnemies !== false) {
       this.spawnT -= dt;
       if (this.spawnT <= 0) {
         this.spawnT = 2.2 + Math.random() * 2.3;
