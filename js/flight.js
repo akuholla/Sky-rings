@@ -25,6 +25,8 @@ export const FLIGHT_PARAMS = {
   dragK: 0.22,         // pull back towards cruise speed
   slipTime: 0.28,      // seconds for velocity to swing onto the nose direction
   ceiling: 1500,       // soft altitude ceiling (m)
+  glideSink: 7,        // m/s the plane sinks with the engine off
+  glideNoseDown: 0.15, // rad/s nose-down tendency with the engine off
 };
 
 export class FlightModel {
@@ -38,6 +40,7 @@ export class FlightModel {
     this.right = new THREE.Vector3();
     this.speed = params.cruise;
     this.rollRate = 0; this.pitchRate = 0; this.yawRate = 0;
+    this.engineOn = true; // false when out of fuel: no thrust, the plane glides down
     this.bank = 0; this.pitch = 0;
   }
 
@@ -76,6 +79,8 @@ export class FlightModel {
     if (this.pos.y > p.ceiling && this.forward.y > -0.2) {
       pitchT = Math.min(pitchT, -0.5 * Math.min(1, (this.pos.y - p.ceiling) / 200));
     }
+    // engine out: the nose keeps wanting to drop
+    if (!this.engineOn && this.pitch > -0.25) pitchT -= p.glideNoseDown;
     // near minimum speed in a steep climb the nose wants to drop
     if (this.speed < p.minSpeed + 4 && this.pitch > 0.35) pitchT = Math.min(pitchT, -0.25);
 
@@ -96,12 +101,14 @@ export class FlightModel {
     this._axes();
 
     // --- speed: gravity along the flight path + drag towards cruise ---
-    const acc = -p.gravity * p.gravityFactor * this.forward.y + (p.cruise - this.speed) * p.dragK;
+    const target = this.engineOn ? p.cruise : 0; // no thrust -> drag bleeds speed
+    const acc = -p.gravity * p.gravityFactor * this.forward.y + (target - this.speed) * p.dragK;
     this.speed = clamp(this.speed + acc * dt, p.minSpeed, p.maxSpeed);
 
     // --- velocity swings onto the nose direction over ~slipTime ---
     _v.copy(this.forward).multiplyScalar(this.speed);
     this.vel.lerp(_v, 1 - Math.exp(-dt / p.slipTime)).setLength(this.speed);
     this.pos.addScaledVector(this.vel, dt);
+    if (!this.engineOn) this.pos.y -= p.glideSink * dt;
   }
 }

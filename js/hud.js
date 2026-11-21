@@ -7,7 +7,9 @@ const _v = new THREE.Vector3(), _p = new THREE.Vector3();
 export class Hud {
   constructor() {
     this.el = $('hud');
-    this.score = $('score'); this.time = $('time'); this.rings = $('rings'); this.streak = $('streak');
+    this.score = $('score'); this.time = $('time'); this.rings = $('rings'); this.streak = $('streak'); this.kills = $('kills');
+    this.fuelEl = $('fuel'); this.fuelFill = $('fuelFill'); this.fuelPct = $('fuelPct'); this.fuelWarn = $('fuelWarn');
+    this.reticle = $('reticle'); this.markerBox = $('enemyMarkers'); this.enemyEls = [];
     this.spd = $('spd'); this.alt = $('alt');
     this.marker = $('marker'); this.arrow = $('markerArrow'); this.dist = $('markerDist');
     this.popupEl = $('popup'); this.crashEl = $('crash'); this.flashEl = $('flash'); this.fogEl = $('cloudfog');
@@ -17,7 +19,8 @@ export class Hud {
     if (this.cache[key] !== val) { this.cache[key] = val; el.textContent = val; }
   }
   show(v) { this.el.classList.toggle('hidden', !v); }
-  setStats({ score, time, rings, streak }) {
+  setStats({ score, time, rings, streak, kills = 0 }) {
+    this._set(this.kills, 'kills', String(kills).padStart(2, '0'));
     this._set(this.score, 'score', String(score).padStart(4, '0'));
     const t = Math.floor(time);
     this._set(this.time, 'time', `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`);
@@ -63,5 +66,53 @@ export class Hud {
     this.marker.classList.toggle('edge', !onScreen);
     this.arrow.style.transform = onScreen ? 'rotate(45deg)' : `rotate(${Math.atan2(-y, x)}rad)`;
     this._set(this.dist, 'dist', Math.round(from.distanceTo(target)) + ' m');
+  }
+
+  setFuel(pct, engineOn) {
+    const p = Math.max(0, Math.min(100, pct));
+    this.fuelFill.style.width = p.toFixed(1) + '%';
+    this._set(this.fuelPct, 'fuel', Math.ceil(p) + '%');
+    this.fuelEl.classList.toggle('low', p <= 30 && p > 15);
+    this.fuelEl.classList.toggle('critical', p <= 15);
+    const warn = !engineOn ? 'ENGINE OUT — GLIDE THROUGH A RING' : p <= 15 ? 'LOW FUEL' : '';
+    this._set(this.fuelWarn, 'fuelWarn', warn);
+    this.fuelWarn.classList.toggle('blink', !!warn);
+  }
+
+  // Laser aim point: where the bolts will be ~350 m ahead
+  updateReticle(camera, point) {
+    if (!point) { this.reticle.style.display = 'none'; return; }
+    _v.copy(point).applyMatrix4(camera.matrixWorldInverse);
+    if (_v.z > 0) { this.reticle.style.display = 'none'; return; }
+    _p.copy(point).project(camera);
+    this.reticle.style.display = 'block';
+    this.reticle.style.transform = `translate(${((_p.x * 0.5 + 0.5) * innerWidth).toFixed(1)}px, ${((1 - (_p.y * 0.5 + 0.5)) * innerHeight).toFixed(1)}px)`;
+  }
+
+  // Brackets on enemies that are on screen and within range
+  updateEnemies(camera, enemies, from) {
+    let n = 0;
+    for (const e of enemies) {
+      const d = from.distanceTo(e.pos);
+      if (d > 2200) continue;
+      _v.copy(e.pos).applyMatrix4(camera.matrixWorldInverse);
+      if (_v.z > 0) continue;
+      _p.copy(e.pos).project(camera);
+      if (Math.abs(_p.x) > 1 || Math.abs(_p.y) > 1) continue;
+      let el = this.enemyEls[n];
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'em';
+        el.appendChild(document.createElement('span'));
+        this.markerBox.appendChild(el);
+        this.enemyEls.push(el);
+      }
+      el.style.display = 'block';
+      el.classList.toggle('balloon', e.kind === 'balloon');
+      el.style.transform = `translate(${((_p.x * 0.5 + 0.5) * innerWidth).toFixed(1)}px, ${((1 - (_p.y * 0.5 + 0.5)) * innerHeight).toFixed(1)}px)`;
+      el.firstChild.textContent = Math.round(d) + ' m';
+      n++;
+    }
+    for (let i = n; i < this.enemyEls.length; i++) this.enemyEls[i].style.display = 'none';
   }
 }

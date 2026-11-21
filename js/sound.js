@@ -45,6 +45,60 @@ export class Sound {
   pause() { if (this.ctx && this.ctx.state === 'running') this.ctx.suspend(); }
   resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
 
+  _ready() { return this.ctx && this.enabled && this.ctx.state === 'running'; }
+
+  // short descending "pew"
+  laser() {
+    if (!this._ready()) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'square';
+    o.frequency.setValueAtTime(1500, t);
+    o.frequency.exponentialRampToValueAtTime(260, t + 0.11);
+    g.gain.setValueAtTime(0.05, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+    o.connect(g).connect(this.master);
+    o.start(t); o.stop(t + 0.13);
+  }
+
+  // metallic tick when a shot lands but doesn't destroy
+  hit() {
+    if (!this._ready()) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(900, t);
+    o.frequency.exponentialRampToValueAtTime(400, t + 0.08);
+    g.gain.setValueAtTime(0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+    o.connect(g).connect(this.master);
+    o.start(t); o.stop(t + 0.11);
+  }
+
+  // explosion: noise burst through a falling low-pass
+  boom(strength = 1) {
+    if (!this._ready()) return;
+    const ctx = this.ctx, dur = 1.4;
+    const len = Math.floor(ctx.sampleRate * dur);
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      const t = i / ctx.sampleRate;
+      d[i] = (Math.random() * 2 - 1) * Math.exp(-t * 3.2);
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    const t0 = ctx.currentTime;
+    lp.frequency.setValueAtTime(2200, t0);
+    lp.frequency.exponentialRampToValueAtTime(90, t0 + dur);
+    const g = ctx.createGain();
+    g.gain.value = 0.55 * strength;
+    src.connect(lp).connect(g).connect(this.master);
+    src.start(t0);
+  }
+
   thunder(delay, strength = 1) {
     const ctx = this.ctx;
     if (!ctx || !this.enabled || ctx.state !== 'running') return;

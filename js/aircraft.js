@@ -33,11 +33,14 @@ function strut(mat, x, yBottom, yTop, zBottom, zTop, w = 0.12) {
   return m;
 }
 
-export function buildAircraft() {
+// Default livery = the player's red/yellow biplane. Enemies pass their own colours.
+export const PLAYER_LIVERY = { wing: 0xe0483a, wingLight: 0xf26a55, body: 0xf2bf4a, prop: 0xe0483a };
+
+export function buildAircraft(livery = PLAYER_LIVERY) {
   const g = new THREE.Group();
-  const red = flat(0xe0483a);
-  const redLight = flat(0xf26a55);
-  const yellow = flat(0xf2bf4a);
+  const red = flat(livery.wing);
+  const redLight = flat(livery.wingLight);
+  const yellow = flat(livery.body);
   const dark = flat(0x2c2c33, { roughness: 0.5, metalness: 0.3 });
   const black = flat(0x18181b);
 
@@ -88,7 +91,7 @@ export function buildAircraft() {
   }
   const disc = new THREE.Mesh(
     new THREE.CircleGeometry(1.55, 24),
-    new THREE.MeshBasicMaterial({ color: 0xe0483a, transparent: true, opacity: 0.1, depthWrite: false, side: THREE.DoubleSide }),
+    new THREE.MeshBasicMaterial({ color: livery.prop, transparent: true, opacity: 0.1, depthWrite: false, side: THREE.DoubleSide }),
   );
   propeller.add(disc);
   g.add(propeller);

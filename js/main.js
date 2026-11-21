@@ -4,7 +4,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { createSceneDef, World, SCENE_LIST } from './world.js';
-import { FlightModel } from './flight.js';
+import { FlightModel, FLIGHT_PARAMS } from './flight.js';
 import { buildAircraft } from './aircraft.js';
 import { Course } from './course.js';
 import { Clouds } from './clouds.js';
@@ -12,6 +12,7 @@ import { Trail, Explosion } from './effects.js';
 import { Hud } from './hud.js';
 import { Atmosphere, buildLook, TIME_LIST, WEATHER_LIST } from './atmosphere.js';
 import { Sound } from './sound.js';
+import { Combat } from './combat.js';
 
 // ---------------------------------------------------------------------------
 // Renderer, camera, post-processing
@@ -61,13 +62,18 @@ planeFill.position.set(0, 8, 10);
 plane.group.add(planeFill);
 const trails = [new Trail(scene), new Trail(scene)];
 const explosion = new Explosion(scene);
+const combat = new Combat(scene, explosion, sound);
 
 let def = null, world = null, course = null, clouds = null;
 let currentScene = null;
-const stats = { score: 0, time: 0, rings: 0, streak: 0 };
+const stats = { score: 0, time: 0, rings: 0, streak: 0, kills: 0 };
+// Fuel (%): each ring refills 10%; burn rate = 10% per ring-to-ring flight time at cruise
+let fuel = 100;
+const FUEL_PER_RING = 10;
+const fuelBurnRate = () => FUEL_PER_RING / (settings.ringGap / FLIGHT_PARAMS.cruise); // %/s
 
 const SETTINGS_KEY = 'skyrings.settings';
-const settings = Object.assign({ scene: 'mountains', time: 'sunset', weather: 'clear', invert: false, autoLevel: true, sound: true, ringGap: 340 },
+const settings = Object.assign({ scene: 'mountains', time: 'sunset', weather: 'clear', invert: false, autoLevel: true, sound: true, ringGap: 340, combat: true },
   JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'));
 const saveSettings = () => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 
@@ -89,7 +95,9 @@ function findStart(w) {
 }
 
 function resetStats() {
-  stats.score = 0; stats.time = 0; stats.rings = 0; stats.streak = 0;
+  stats.score = 0; stats.time = 0; stats.rings = 0; stats.streak = 0; stats.kills = 0;
+  fuel = 100;
+  flight.engineOn = true;
 }
 
 function loadScene(id) {
@@ -108,6 +116,8 @@ function loadScene(id) {
   clouds.initAmbient(start.pos);
   course = new Course(scene, world, clouds, 1234, settings.ringGap);
   course.reset(start.pos, start.heading);
+  combat.reset(world, course);
+  combat.setEnabled(settings.combat);
   respawnAt(start.pos, headingDir(start.heading));
   resetStats();
   explosion.parts.forEach((p) => { explosion.group.remove(p.s); p.s.material.dispose(); });
@@ -174,6 +184,9 @@ const groups = [
 const optSound = document.getElementById('optSound');
 optSound.checked = settings.sound;
 sound.setEnabled(settings.sound);
+const optCombat = document.getElementById('optCombat');
+optCombat.checked = settings.combat;
+optCombat.addEventListener('change', () => { settings.combat = optCombat.checked; saveSettings(); combat.setEnabled(settings.combat); });
 optSound.addEventListener('change', () => { settings.sound = optSound.checked; saveSettings(); sound.setEnabled(settings.sound); });
 
 // Ring spacing slider: live label while dragging; on release, rebuild the rings
@@ -252,6 +265,7 @@ function crash() {
   crashPos.copy(flight.pos);
   plane.group.visible = false;
   explosion.spawn(flight.pos, flight.vel);
+  sound.boom(1.2);
   hud.flash();
   hud.showCrash(true);
   resetStats();
@@ -260,12 +274,15 @@ function crash() {
 function finishCrash() {
   const r = course.respawnPoint();
   respawnAt(r.pos, r.dir);
+  combat.clearNear(r.pos, 600);
   hud.showCrash(false);
   state = 'playing';
 }
 
 function stepPlaying(dt) {
   prevPos.copy(flight.pos);
+  fuel = Math.max(0, fuel - fuelBurnRate() * dt);
+  if (fuel <= 0 && flight.engineOn) { flight.engineOn = false; hud.popup('OUT OF FUEL — glide through a ring!', 'bad'); }
   flight.update(dt, readInput(), { autoLevel: settings.autoLevel });
   stats.time += dt;
   for (const ev of course.update(prevPos, flight.pos)) {
@@ -274,10 +291,24 @@ function stepPlaying(dt) {
       stats.rings++;
       const pts = 100 + 25 * Math.min(stats.streak - 1, 20);
       stats.score += pts;
-      hud.popup('+' + pts + (stats.streak > 1 ? `  streak x${stats.streak}` : ''), 'good');
+      const wasOut = !flight.engineOn;
+      fuel = Math.min(100, fuel + FUEL_PER_RING);
+      flight.engineOn = true;
+      hud.popup('+' + pts + (stats.streak > 1 ? `  streak x${stats.streak}` : '') + `  ·  +${FUEL_PER_RING}% fuel`, 'good');
+      if (wasOut) hud.popup('ENGINE RESTARTED', 'kill');
     } else {
       stats.streak = 0;
       hud.popup('MISSED', 'bad');
+    }
+  }
+  for (const ev of combat.update(dt, { flight, plane, firing: !!keys.Space, active: true })) {
+    if (ev.type === 'kill') {
+      stats.score += ev.points;
+      stats.kills++;
+      hud.popup(`+${ev.points}  ${ev.kind === 'balloon' ? 'BALLOON POPPED' : 'ENEMY DOWN'}`, 'kill');
+    } else if (ev.type === 'collide') {
+      crash();
+      return;
     }
   }
   if (checkCollision()) crash();
@@ -317,7 +348,7 @@ function updateCamera(dt) {
 // ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
-let lastT = performance.now(), elapsed = 0;
+let lastT = performance.now(), elapsed = 0, propSpin = 55;
 
 function frame(now) {
   requestAnimationFrame(frame);
@@ -328,6 +359,7 @@ function frame(now) {
   if (state === 'playing') stepPlaying(dt);
   else if (state === 'crashed') {
     crashT -= dt;
+    combat.update(dt, { flight, plane, firing: false, active: false });
     if (crashT <= 0) finishCrash();
   }
 
@@ -338,7 +370,8 @@ function frame(now) {
   // aircraft visuals
   plane.group.position.copy(flight.pos);
   plane.group.quaternion.copy(flight.quat);
-  plane.propeller.rotation.z += dt * 55;
+  propSpin += ((flight.engineOn ? 55 : 0) - propSpin) * (1 - Math.exp(-dt * 1.5)); // windmills down when out of fuel
+  plane.propeller.rotation.z += dt * propSpin;
   plane.group.updateMatrixWorld();
   if (state === 'playing') {
     const strength = 0.45 * THREE.MathUtils.smoothstep(Math.abs(flight.pitchRate) / 0.6 + Math.abs(flight.bank) / 1.2, 0.3, 1.0);
@@ -363,8 +396,12 @@ function frame(now) {
   if (state !== 'menu') {
     hud.setStats(stats);
     hud.setFlight(flight.speed, flight.pos.y - world.surfaceAt(flight.pos.x, flight.pos.z));
+    hud.setFuel(fuel, flight.engineOn);
     const r = course.nextRing();
     hud.updateMarker(camera, r && r.pos, flight.pos);
+    const aim = combat.enabled && state === 'playing' ? _w.copy(flight.forward).multiplyScalar(350).add(flight.pos) : null;
+    hud.updateReticle(camera, aim);
+    hud.updateEnemies(camera, combat.enabled ? combat.enemies : [], flight.pos);
   }
 
   composer.render();
@@ -382,4 +419,4 @@ document.getElementById('loading')?.remove();
 requestAnimationFrame((t) => { lastT = t; frame(t); });
 
 // handy for debugging from the console
-window.__sim = { flight, get course() { return course; }, get world() { return world; }, get state() { return state; }, get lastT() { return lastT; }, get look() { return look; }, atmo, stats, settings };
+window.__sim = { flight, get course() { return course; }, get world() { return world; }, get state() { return state; }, get lastT() { return lastT; }, get look() { return look; }, atmo, combat, keys, get fuel() { return fuel; }, set fuel(v) { fuel = v; }, fuelBurnRate, stats, settings };

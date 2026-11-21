@@ -22,6 +22,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #1a0e0a; fon
 .pop { font-weight: 700; font-size: 22px; letter-spacing: 1px; text-shadow: 0 2px 8px rgba(0,0,0,0.6); animation: pop 1.1s ease-out forwards; }
 .pop.good { color: #ffd45a; }
 .pop.bad { color: #ff5a4a; }
+.pop.kill { color: #8ef0ff; }
 @keyframes pop { 0% { opacity: 0; transform: translateY(10px) scale(0.9); } 15% { opacity: 1; transform: translateY(0) scale(1.05); } 100% { opacity: 0; transform: translateY(-24px) scale(1); } }
 
 #marker { position: absolute; left: 0; top: 0; width: 0; height: 0; }
@@ -77,3 +78,19 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 5px; margin-right: 2p
 .opt.range { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; margin-top: 10px; }
 .opt.range input[type=range] { width: 100%; accent-color: #ffb347; }
 .rangeval { font: 600 12px ui-monospace, Menlo, monospace; color: #ffd9a8; min-width: 92px; text-align: right; }
+
+#reticle { position: absolute; left: 0; top: 0; width: 34px; height: 34px; margin: -17px 0 0 -17px; border: 2px solid rgba(140, 240, 255, 0.85); border-radius: 50%; box-shadow: 0 0 6px rgba(80, 220, 255, 0.6); display: none; }
+#reticle .dot { position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; background: rgba(160, 245, 255, 0.95); }
+#enemyMarkers .em { position: absolute; left: 0; top: 0; width: 26px; height: 26px; margin: -13px 0 0 -13px; border: 2px solid rgba(255, 70, 60, 0.85); border-radius: 3px; display: none; }
+#enemyMarkers .em.balloon { border-color: rgba(255, 170, 60, 0.85); border-radius: 50%; }
+#enemyMarkers .em span { position: absolute; top: 26px; left: -20px; width: 66px; text-align: center; font: 600 10px ui-monospace, Menlo, monospace; color: #ffb0a8; text-shadow: 0 1px 2px #000; }
+
+#fuel { display: flex; align-items: center; gap: 8px; }
+#fuel .bar { width: 120px; height: 10px; border-radius: 5px; background: rgba(255, 255, 255, 0.14); overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.2); }
+#fuel .fill { height: 100%; width: 100%; border-radius: 5px; background: #57d97a; transition: background-color 0.3s; }
+#fuelPct { min-width: 40px; text-align: right; }
+#fuel.low .fill { background: #ffb43a; }
+#fuel.critical .fill { background: #ff4a3a; animation: blink 0.6s steps(2) infinite; }
+#fuelWarn { position: absolute; left: 50%; bottom: 80px; transform: translateX(-50%); font: 700 18px system-ui, sans-serif; letter-spacing: 2px; color: #ff6a4a; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7); }
+#fuelWarn.blink { animation: blink 0.8s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0.25; } }
