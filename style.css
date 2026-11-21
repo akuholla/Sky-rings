@@ -45,6 +45,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #1a0e0a; fon
 #help { position: absolute; right: 20px; bottom: 22px; font-size: 12px; color: rgba(255, 230, 210, 0.7); text-shadow: 0 1px 2px #000; }
 
 #cloudfog { position: fixed; inset: 0; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, rgba(255, 228, 210, 0.7), rgba(235, 190, 170, 0.95)); }
+#lightning { position: fixed; inset: 0; pointer-events: none; opacity: 0; background: #dfe8ff; mix-blend-mode: screen; }
 #flash { position: fixed; inset: 0; pointer-events: none; opacity: 0; background: #fff3d0; }
 #flash.go { animation: flash 0.8s ease-out; }
 @keyframes flash { 0% { opacity: 0.9; } 100% { opacity: 0; } }
@@ -55,13 +56,16 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #1a0e0a; fon
 
 /* ---------- Menu ---------- */
 #menu { position: fixed; inset: 0; display: flex; align-items: center; justify-content: flex-start; padding-left: 6vw; background: linear-gradient(90deg, rgba(20, 8, 6, 0.75), rgba(20, 8, 6, 0.1) 60%); }
-.panel { width: 380px; padding: 28px 30px; background: rgba(18, 12, 16, 0.72); border: 1px solid rgba(255, 200, 150, 0.18); border-radius: 14px; backdrop-filter: blur(8px); }
+.panel { width: 400px; max-height: 94vh; overflow-y: auto; padding: 24px 28px; background: rgba(18, 12, 16, 0.72); border: 1px solid rgba(255, 200, 150, 0.18); border-radius: 14px; backdrop-filter: blur(8px); }
 .panel h1 { margin: 0; font-size: 40px; letter-spacing: 6px; background: linear-gradient(180deg, #ffe08a, #ff8a3a); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .panel .sub { margin: 6px 0 18px; color: rgba(255, 230, 210, 0.8); }
 .panel h3 { margin: 16px 0 8px; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: rgba(255, 210, 170, 0.7); }
-#scenes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+#menu .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+#menu .grid.four { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+#menu .grid.three { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+#menu .grid.four .scene, #menu .grid.three .scene { padding: 8px 4px; font-size: 13px; }
 button { font: inherit; cursor: pointer; }
-.scene { padding: 10px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.15); background: rgba(255, 255, 255, 0.06); color: #fff; }
+.scene { padding: 9px 8px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.15); background: rgba(255, 255, 255, 0.06); color: #fff; }
 .scene:hover { background: rgba(255, 255, 255, 0.12); }
 .scene.active { border-color: #ffb347; background: rgba(255, 160, 60, 0.22); }
 .opt { display: block; margin: 6px 0; font-size: 14px; color: rgba(255, 240, 230, 0.9); cursor: pointer; }
@@ -69,3 +73,7 @@ button { font: inherit; cursor: pointer; }
 #start:hover { filter: brightness(1.08); }
 .keys { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 10px 16px; font-size: 12px; color: rgba(255, 230, 210, 0.75); }
 kbd { display: inline-block; min-width: 20px; padding: 1px 5px; margin-right: 2px; border-radius: 4px; border: 1px solid rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.08); font-size: 11px; text-align: center; }
+
+.opt.range { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; margin-top: 10px; }
+.opt.range input[type=range] { width: 100%; accent-color: #ffb347; }
+.rangeval { font: 600 12px ui-monospace, Menlo, monospace; color: #ffd9a8; min-width: 92px; text-align: right; }

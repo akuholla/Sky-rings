@@ -36,11 +36,7 @@ function mountainsDef() {
   const t1 = [0, 0, 0], t2 = [0, 0, 0];
   return {
     id: 'mountains',
-    sun: { elevation: 2.2, azimuth: 180, color: 0xff9a50, intensity: 3.4 },
-    sky: { turbidity: 12, rayleigh: 4.0, mie: 0.004, mieG: 0.92 },
-    exposure: 0.42,
-    fog: { color: 0xb8683f, density: 0.00022 },
-    hemi: { sky: 0xffb08a, ground: 0x2e2030, intensity: 0.75 },
+    fogDensity: 0.00022,
     waterLevel: 0, waterColor: 0x0a1620,
     valleyWeight: 1.0, clearance: 45,
     obstacles: null,
@@ -71,11 +67,7 @@ function cityDef() {
   const ASPH = [0.15, 0.15, 0.16], PARK = [0.16, 0.22, 0.11];
   return {
     id: 'city',
-    sun: { elevation: 3.5, azimuth: 195, color: 0xff9858, intensity: 3.2 },
-    sky: { turbidity: 11, rayleigh: 3.6, mie: 0.004, mieG: 0.92, tint: [1.2, 0.8, 0.68] },
-    exposure: 0.48,
-    fog: { color: 0x9a6458, density: 0.0002 },
-    hemi: { sky: 0xffb59a, ground: 0x2a2430, intensity: 0.85 },
+    fogDensity: 0.0002,
     waterLevel: null,
     valleyWeight: 0.35, clearance: 40,
     obstacles: 'city',
@@ -92,11 +84,7 @@ function forestDef() {
   const t1 = [0, 0, 0];
   return {
     id: 'forest',
-    sun: { elevation: 4.5, azimuth: 170, color: 0xffa868, intensity: 3.2 },
-    sky: { turbidity: 10, rayleigh: 3.4, mie: 0.004, mieG: 0.92, tint: [1.2, 0.86, 0.62] },
-    exposure: 0.45,
-    fog: { color: 0x9a6c56, density: 0.00024 },
-    hemi: { sky: 0xffc09a, ground: 0x24301c, intensity: 0.8 },
+    fogDensity: 0.00024,
     waterLevel: 0, waterColor: 0x0c1a1c,
     valleyWeight: 0.35, clearance: 42,
     obstacles: 'forest',
@@ -118,11 +106,7 @@ function islandsDef() {
   const t1 = [0, 0, 0];
   return {
     id: 'islands',
-    sun: { elevation: 1.6, azimuth: 185, color: 0xff8a4a, intensity: 3.6 },
-    sky: { turbidity: 13, rayleigh: 4.2, mie: 0.004, mieG: 0.92, tint: [1.3, 0.75, 0.6] },
-    exposure: 0.4,
-    fog: { color: 0xa05a4c, density: 0.0002 },
-    hemi: { sky: 0xffa080, ground: 0x2a1e2c, intensity: 0.75 },
+    fogDensity: 0.0002,
     waterLevel: 0, waterColor: 0x08141e,
     valleyWeight: 0.6, clearance: 45,
     obstacles: null,
@@ -147,9 +131,11 @@ function islandsDef() {
 // ---------------------------------------------------------------------------
 const _col = new THREE.Color();
 
+const SNOWC = [0.9, 0.92, 0.96];
+
 class Terrain {
-  constructor(def, size = 12000, seg = 240) {
-    this.def = def; this.size = size; this.seg = seg; this.sp = size / seg;
+  constructor(def, env, size = 12000, seg = 240) {
+    this.def = def; this.snow = !!env.snow; this.size = size; this.seg = seg; this.sp = size / seg;
     this.mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
     this.geos = [this._makeGeo(), this._makeGeo()];
     this.cur = 0;
@@ -175,7 +161,9 @@ class Terrain {
     yield;
     const nrm = geo.attributes.normal.array, col = geo.attributes.color.array, o = [0, 0, 0];
     for (let i = 0; i < n; i++) {
-      this.def.color(pos[i * 3 + 1], 1 - nrm[i * 3 + 1], pos[i * 3] + cx, pos[i * 3 + 2] + cz, o);
+      const h = pos[i * 3 + 1], slope = 1 - nrm[i * 3 + 1];
+      this.def.color(h, slope, pos[i * 3] + cx, pos[i * 3 + 2] + cz, o);
+      if (this.snow && h > (this.def.waterLevel ?? -1e9) + 1.5) mixInto(o, o, SNOWC, (1 - smoothstep(0.3, 0.6, slope)) * 0.92);
       _col.setRGB(o[0], o[1], o[2], THREE.SRGBColorSpace);
       col[i * 3] = _col.r; col[i * 3 + 1] = _col.g; col[i * 3 + 2] = _col.b;
       if (i % 12000 === 11999) yield;
@@ -221,48 +209,80 @@ class Terrain {
 }
 
 // ---------------------------------------------------------------------------
-// Water with a procedural, tileable normal map (gives the glittering sun path)
+// Water: a custom shader on top of MeshStandardMaterial. Three layers of a smooth,
+// tileable slope texture (big swells, medium waves, fine ripples) drift in different
+// directions in world space; detail fades out with distance so the far water is calm
+// and glassy. Lighting, fog and sky reflections still come from three.js.
 // ---------------------------------------------------------------------------
-function makeWaterNormalTexture() {
-  const S = 256, h = new Float32Array(S * S), rnd = mulberry32(9), waves = [];
-  for (let k = 0; k < 28; k++) {
-    const fx = Math.round((rnd() * 2 - 1) * 7), fy = Math.round((rnd() * 2 - 1) * 7);
+function makeWaveSlopeTexture() {
+  const S = 256, rnd = mulberry32(9), waves = [];
+  for (let k = 0; k < 22; k++) {
+    const fx = Math.round((rnd() * 2 - 1) * 5), fy = Math.round((rnd() * 2 - 1) * 5);
     if (fx === 0 && fy === 0) continue;
-    waves.push({ fx, fy, a: 1 / Math.hypot(fx, fy), ph: rnd() * Math.PI * 2 });
+    const f = Math.hypot(fx, fy);
+    waves.push({ fx, fy, a: 1 / Math.pow(f, 1.6), ph: rnd() * Math.PI * 2 });
   }
+  // analytic slopes of a sum of sines (smooth, rounded crests)
+  const sx = new Float32Array(S * S), sy = new Float32Array(S * S);
+  let max = 0;
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-    let v = 0;
-    for (const w of waves) v += w.a * Math.sin(2 * Math.PI * (w.fx * x / S + w.fy * y / S) + w.ph);
-    h[y * S + x] = v;
+    let dx = 0, dy = 0;
+    for (const w of waves) {
+      const c = w.a * Math.cos(2 * Math.PI * (w.fx * x / S + w.fy * y / S) + w.ph);
+      dx += c * w.fx; dy += c * w.fy;
+    }
+    const i = y * S + x;
+    sx[i] = dx; sy[i] = dy;
+    max = Math.max(max, Math.abs(dx), Math.abs(dy));
   }
-  const cv = document.createElement('canvas'); cv.width = cv.height = S;
-  const ctx = cv.getContext('2d'), img = ctx.createImageData(S, S);
-  const k = 6.0;
-  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-    const dx = h[y * S + ((x + 1) % S)] - h[y * S + ((x - 1 + S) % S)];
-    const dy = h[((y + 1) % S) * S + x] - h[((y - 1 + S) % S) * S + x];
-    let nx = -dx * k, ny = -dy * k, nz = 1;
-    const l = Math.hypot(nx, ny, nz); nx /= l; ny /= l; nz /= l;
-    const i = (y * S + x) * 4;
-    img.data[i] = (nx * 0.5 + 0.5) * 255; img.data[i + 1] = (ny * 0.5 + 0.5) * 255;
-    img.data[i + 2] = (nz * 0.5 + 0.5) * 255; img.data[i + 3] = 255;
+  const data = new Uint8Array(S * S * 4);
+  for (let i = 0; i < S * S; i++) {
+    data[i * 4] = (sx[i] / max * 0.5 + 0.5) * 255;
+    data[i * 4 + 1] = (sy[i] / max * 0.5 + 0.5) * 255;
+    data[i * 4 + 2] = 255; data[i * 4 + 3] = 255;
   }
-  ctx.putImageData(img, 0, 0);
-  const tex = new THREE.CanvasTexture(cv);
+  const tex = new THREE.DataTexture(data, S, S);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;
   tex.anisotropy = 8;
+  tex.needsUpdate = true;
   return tex;
 }
 
 class Water {
-  constructor(level, color) {
-    this.size = 30000; this.tile = 100; this.snap = 600;
-    this.tex = makeWaterNormalTexture();
-    this.tex.repeat.set(this.size / this.tile, this.size / this.tile);
-    this.mat = new THREE.MeshStandardMaterial({
-      color, roughness: 0.16, metalness: 0.15,
-      normalMap: this.tex, normalScale: new THREE.Vector2(0.3, 0.3),
-    });
+  constructor(level, color, env = {}) {
+    this.size = 30000; this.snap = 600;
+    this.tex = makeWaveSlopeTexture();
+    this.uTime = { value: 0 };
+    this.speed = env.waterSpeed ?? 1;
+    const strength = (env.waterStrength ?? 1).toFixed(3);
+    this.mat = new THREE.MeshStandardMaterial({ color, roughness: 0.07, metalness: 0.0 });
+    this.mat.customProgramCacheKey = () => 'water-' + strength;
+    this.mat.onBeforeCompile = (sh) => {
+      sh.uniforms.uWaveTex = { value: this.tex };
+      sh.uniforms.uTime = this.uTime;
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nuniform sampler2D uWaveTex;\nuniform float uTime;')
+        .replace('#include <normal_fragment_maps>', `
+          {
+            vec2 p = vWPos.xz;
+            float dist = length(vWPos - cameraPosition);
+            vec2 swell  = texture2D(uWaveTex, p / 900.0 + uTime * vec2(0.0040, -0.0025)).xy * 2.0 - 1.0;
+            vec2 waves  = texture2D(uWaveTex, p / 260.0 + uTime * vec2(-0.0090, 0.0060)).xy * 2.0 - 1.0;
+            vec2 ripple = texture2D(uWaveTex, p / 47.0  + uTime * vec2(0.0300, 0.0220)).xy * 2.0 - 1.0;
+            float farFade = 1.0 - 0.75 * smoothstep(150.0, 3000.0, dist);
+            float rippleFade = 1.0 - smoothstep(40.0, 500.0, dist);
+            vec2 slope = (swell * 0.22 + waves * 0.16) * farFade + ripple * 0.05 * rippleFade;
+            slope *= ${strength};
+            vec3 wn = normalize(vec3(slope.x, 1.0, slope.y));
+            normal = normalize((viewMatrix * vec4(wn, 0.0)).xyz);
+          }`);
+    };
     const geo = new THREE.PlaneGeometry(this.size, this.size);
     geo.rotateX(-Math.PI / 2);
     this.mesh = new THREE.Mesh(geo, this.mat);
@@ -271,8 +291,7 @@ class Water {
   update(dt, px, pz) {
     this.mesh.position.x = Math.round(px / this.snap) * this.snap;
     this.mesh.position.z = Math.round(pz / this.snap) * this.snap;
-    this.tex.offset.x += dt * 0.004;
-    this.tex.offset.y += dt * 0.0025;
+    this.uTime.value += dt * this.speed;
   }
   dispose() { this.mesh.geometry.dispose(); this.mat.dispose(); this.tex.dispose(); }
 }
@@ -328,8 +347,12 @@ const _yAxis = new THREE.Vector3(0, 1, 0), _c = new THREE.Color();
 const BLOCK = 120, STREET = 30, CITY_CHUNK_BLOCKS = 4;
 const BUILDING_PALETTE = [0x8a8f99, 0x6d7380, 0xa59a8c, 0x4f5866, 0x9aa3ad, 0x5d6470, 0xb3a58f];
 
-function makeBuildingMaterial() {
+function makeBuildingMaterial(env) {
+  env = { windowLit: 0.7, windowGlow: 1.6, snow: false, ...env };
+  const f = (v) => v.toFixed(3);
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.65, metalness: 0.2 });
+  // shader text depends on env, so give each variant its own program cache key
+  mat.customProgramCacheKey = () => `bld-${f(env.windowLit)}-${f(env.windowGlow)}-${env.snow ? 1 : 0}`;
   mat.onBeforeCompile = (sh) => {
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vBPos;\nvarying vec3 vBNrm;\nvarying float vBSeed;')
@@ -356,22 +379,23 @@ function makeBuildingMaterial() {
           vec2 cell = floor(vec2(u, v));
           vec2 f = fract(vec2(u, v));
           float win = step(0.18, f.x) * step(f.x, 0.82) * step(0.25, f.y) * step(f.y, 0.8) * isWall * step(3.0, vBPos.y);
-          float lit = step(0.7, bHash(cell + vec2(vBSeed, vBSeed * 1.7)));
+          float lit = step(${f(env.windowLit)}, bHash(cell + vec2(vBSeed, vBSeed * 1.7)));
           diffuseColor.rgb *= mix(1.0, 0.5, isRoof);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.85, 0.87, 0.9), isRoof * ${env.snow ? '1.0' : '0.0'});
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.3 + vec3(0.02, 0.03, 0.05), win);
-          totalEmissiveRadiance += win * lit * vec3(1.0, 0.62, 0.3) * 1.6;
+          totalEmissiveRadiance += win * lit * vec3(1.0, 0.62, 0.3) * ${f(env.windowGlow)};
         }`);
   };
   return mat;
 }
 
 class City {
-  constructor() {
+  constructor(env) {
     this.noise = makeNoise2D(909);
     this.cache = new Map();
     this.geo = new THREE.BoxGeometry(1, 1, 1);
     this.geo.translate(0, 0.5, 0);
-    this.mat = makeBuildingMaterial();
+    this.mat = makeBuildingMaterial(env);
     this.palette = BUILDING_PALETTE.map((c) => new THREE.Color(c));
     this.group = new THREE.Group();
     this.field = new ChunkField(this.group, BLOCK * CITY_CHUNK_BLOCKS, 3800, (ci, cj) => this._buildChunk(ci, cj));
@@ -439,9 +463,11 @@ class City {
 // ---------------------------------------------------------------------------
 const TCELL = 20, FCHUNK = 400;
 
+const WHITE = new THREE.Color(0xe8ecf2);
+
 class Forest {
-  constructor(def) {
-    this.def = def;
+  constructor(def, env) {
+    this.def = def; this.snow = !!env.snow;
     this.noise = makeNoise2D(606);
     const canopy = new THREE.ConeGeometry(1, 0.85, 7, 1); canopy.translate(0, 0.575, 0);
     const canopy2 = new THREE.ConeGeometry(0.75, 0.6, 7, 1); canopy2.translate(0, 0.78, 0);
@@ -474,6 +500,7 @@ class Forest {
       _m.compose(_p.set(t.x, t.g - 1.5, t.z), _q, _s.set(t.r, t.h, t.r));
       m.setMatrixAt(i, _m);
       _c.setHSL(0.22 + hash2(t.ci, t.cj, 17) * 0.1, 0.45, 0.1 + hash2(t.ci, t.cj, 18) * 0.08, THREE.SRGBColorSpace);
+      if (this.snow) _c.lerp(WHITE, 0.45);
       m.setColorAt(i, _c);
     });
     m.instanceMatrix.needsUpdate = true;
@@ -499,16 +526,17 @@ class Forest {
 // World
 // ---------------------------------------------------------------------------
 export class World {
-  constructor(scene, def) {
+  constructor(scene, def, env = {}) {
     this.scene = scene;
     this.def = def;
+    this.env = env;
     this.group = new THREE.Group();
     scene.add(this.group);
-    this.terrain = new Terrain(def);
+    this.terrain = new Terrain(def, env);
     this.group.add(this.terrain.mesh);
-    this.water = def.waterLevel != null ? new Water(def.waterLevel, def.waterColor) : null;
+    this.water = def.waterLevel != null ? new Water(def.waterLevel, def.waterColor, env) : null;
     if (this.water) this.group.add(this.water.mesh);
-    this.obstacles = def.obstacles === 'city' ? new City() : def.obstacles === 'forest' ? new Forest(def) : null;
+    this.obstacles = def.obstacles === 'city' ? new City(env) : def.obstacles === 'forest' ? new Forest(def, env) : null;
     if (this.obstacles) this.group.add(this.obstacles.group);
   }
   init(x, z) {

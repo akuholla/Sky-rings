@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { Sky } from 'three/addons/objects/Sky.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -11,6 +10,8 @@ import { Course } from './course.js';
 import { Clouds } from './clouds.js';
 import { Trail, Explosion } from './effects.js';
 import { Hud } from './hud.js';
+import { Atmosphere, buildLook, TIME_LIST, WEATHER_LIST } from './atmosphere.js';
+import { Sound } from './sound.js';
 
 // ---------------------------------------------------------------------------
 // Renderer, camera, post-processing
@@ -41,67 +42,11 @@ addEventListener('resize', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Sky, sun, ambient light, environment
+// Atmosphere (sky, lights, stars, moon, rain/snow, lightning) + sound
 // ---------------------------------------------------------------------------
-// Sky with a warm colour grade: lifts reds, mutes the blue-grey zenith
-function makeSky() {
-  const s = new Sky();
-  s.material.uniforms.tint = { value: new THREE.Vector3(1, 1, 1) };
-  s.material.fragmentShader = s.material.fragmentShader
-    .replace('void main() {', 'uniform vec3 tint;\nvoid main() {')
-    .replace('gl_FragColor = vec4( retColor, 1.0 );',
-      'float lum = dot(retColor, vec3(0.3, 0.55, 0.15));\n' +
-      'retColor = mix(vec3(lum), retColor, 1.25) * tint;\n' +
-      'gl_FragColor = vec4( retColor, 1.0 );');
-  return s;
-}
-const sky = makeSky();
-sky.scale.setScalar(20000);
-scene.add(sky);
-const sunLight = new THREE.DirectionalLight(0xffffff, 3);
-scene.add(sunLight, sunLight.target);
-const hemi = new THREE.HemisphereLight(0xffffff, 0x000000, 1);
-scene.add(hemi);
-const pmrem = new THREE.PMREMGenerator(renderer);
-let envRT = null;
-let baseFog = 0.0002;
-
-function setSkyUniforms(s, def, sunDir) {
-  const u = s.material.uniforms;
-  u.turbidity.value = def.sky.turbidity;
-  u.rayleigh.value = def.sky.rayleigh;
-  u.mieCoefficient.value = def.sky.mie;
-  u.mieDirectionalG.value = def.sky.mieG;
-  u.sunPosition.value.copy(sunDir);
-  u.tint.value.fromArray(def.sky.tint || [1.25, 0.82, 0.6]);
-}
-
-function applyLook(def) {
-  const sunDir = new THREE.Vector3().setFromSphericalCoords(
-    1, THREE.MathUtils.degToRad(90 - def.sun.elevation), THREE.MathUtils.degToRad(def.sun.azimuth));
-  setSkyUniforms(sky, def, sunDir);
-  sunLight.color.set(def.sun.color);
-  sunLight.intensity = def.sun.intensity;
-  sunLight.position.copy(sunDir).multiplyScalar(1000);
-  hemi.color.set(def.hemi.sky);
-  hemi.groundColor.set(def.hemi.ground);
-  hemi.intensity = def.hemi.intensity;
-  baseFog = def.fog.density;
-  scene.fog = new THREE.FogExp2(def.fog.color, baseFog);
-  renderer.toneMappingExposure = def.exposure;
-
-  // Reflections (water, plane, rings) come from a pre-filtered copy of the sky
-  const envScene = new THREE.Scene();
-  const envSky = makeSky();
-  envSky.scale.setScalar(50);
-  setSkyUniforms(envSky, def, sunDir);
-  envScene.add(envSky);
-  if (envRT) envRT.dispose();
-  envRT = pmrem.fromScene(envScene, 0.02);
-  envSky.geometry.dispose(); envSky.material.dispose();
-  scene.environment = envRT.texture;
-  scene.environmentIntensity = 0.6;
-}
+const sound = new Sound();
+const atmo = new Atmosphere(scene, renderer, sound);
+let look = null;
 
 // ---------------------------------------------------------------------------
 // Game objects
@@ -110,6 +55,10 @@ const hud = new Hud();
 const flight = new FlightModel();
 const plane = buildAircraft();
 scene.add(plane.group);
+// soft fill light that follows the plane so it stays readable at night / in storms
+const planeFill = new THREE.PointLight(0xc8d4ff, 0, 40, 1.5);
+planeFill.position.set(0, 8, 10);
+plane.group.add(planeFill);
 const trails = [new Trail(scene), new Trail(scene)];
 const explosion = new Explosion(scene);
 
@@ -118,7 +67,7 @@ let currentScene = null;
 const stats = { score: 0, time: 0, rings: 0, streak: 0 };
 
 const SETTINGS_KEY = 'skyrings.settings';
-const settings = Object.assign({ scene: 'mountains', invert: false, autoLevel: true },
+const settings = Object.assign({ scene: 'mountains', time: 'sunset', weather: 'clear', invert: false, autoLevel: true, sound: true, ringGap: 340 },
   JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'));
 const saveSettings = () => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 
@@ -147,13 +96,17 @@ function loadScene(id) {
   if (world) { course.dispose(); clouds.dispose(); world.dispose(); }
   currentScene = id;
   def = createSceneDef(id);
-  applyLook(def);
-  world = new World(scene, def);
+  look = buildLook(def, settings.time, settings.weather);
+  atmo.apply(look);
+  planeFill.intensity = look.night ? 120 : look.weatherId === 'storm' ? 60 : 0;
+  world = new World(scene, def, look.env);
   const start = findStart(world);
   world.init(start.pos.x, start.pos.z);
-  clouds = new Clouds(scene, world);
+  clouds = new Clouds(scene, world, { ...look.clouds, sunDir: look.lightDir, sunColor: look.light.color });
+  const [c0, c1] = look.clouds.palette.map((c) => '#' + new THREE.Color(c).getHexString());
+  document.getElementById('cloudfog').style.background = `radial-gradient(ellipse at center, ${c0}cc, ${c1}f2)`;
   clouds.initAmbient(start.pos);
-  course = new Course(scene, world, clouds);
+  course = new Course(scene, world, clouds, 1234, settings.ringGap);
   course.reset(start.pos, start.heading);
   respawnAt(start.pos, headingDir(start.heading));
   resetStats();
@@ -191,25 +144,51 @@ let state = 'menu';
 let started = false;
 const menuEl = document.getElementById('menu');
 const startBtn = document.getElementById('start');
-const sceneBox = document.getElementById('scenes');
 const optInvert = document.getElementById('optInvert');
 const optLevel = document.getElementById('optLevel');
 
-for (const s of SCENE_LIST) {
-  const b = document.createElement('button');
-  b.className = 'scene';
-  b.dataset.scene = s.id;
-  b.textContent = s.label;
-  b.addEventListener('click', () => {
-    if (s.id !== currentScene) {
-      settings.scene = s.id; saveSettings();
-      loadScene(s.id);
+// Button groups: scene / time of day / weather. Any change rebuilds the world.
+function buttonGroup(boxId, list, key) {
+  const box = document.getElementById(boxId);
+  for (const item of list) {
+    const b = document.createElement('button');
+    b.className = 'scene';
+    b.dataset.id = item.id;
+    b.textContent = item.label;
+    b.addEventListener('click', () => {
+      if (settings[key] === item.id && (key !== 'scene' || currentScene === item.id)) return;
+      settings[key] = item.id; saveSettings();
+      loadScene(settings.scene);
       started = false;
       refreshMenu();
-    }
-  });
-  sceneBox.appendChild(b);
+    });
+    box.appendChild(b);
+  }
+  return { box, key };
 }
+const groups = [
+  buttonGroup('scenes', SCENE_LIST, 'scene'),
+  buttonGroup('times', TIME_LIST, 'time'),
+  buttonGroup('weathers', WEATHER_LIST, 'weather'),
+];
+const optSound = document.getElementById('optSound');
+optSound.checked = settings.sound;
+sound.setEnabled(settings.sound);
+optSound.addEventListener('change', () => { settings.sound = optSound.checked; saveSettings(); sound.setEnabled(settings.sound); });
+
+// Ring spacing slider: live label while dragging; on release, rebuild the rings
+// ahead of the plane with the new spacing (score is kept).
+const optGap = document.getElementById('optGap');
+const optGapVal = document.getElementById('optGapVal');
+const showGap = (v) => { optGapVal.textContent = `${v} m · ~${(v / 72).toFixed(1)} s`; };
+optGap.value = settings.ringGap;
+showGap(settings.ringGap);
+optGap.addEventListener('input', () => showGap(+optGap.value));
+optGap.addEventListener('change', () => {
+  settings.ringGap = +optGap.value; saveSettings();
+  course.spacing = settings.ringGap;
+  course.reset(flight.pos.clone(), Math.atan2(flight.forward.x, -flight.forward.z));
+});
 optInvert.checked = settings.invert;
 optLevel.checked = settings.autoLevel;
 optInvert.addEventListener('change', () => { settings.invert = optInvert.checked; saveSettings(); });
@@ -217,17 +196,20 @@ optLevel.addEventListener('change', () => { settings.autoLevel = optLevel.checke
 startBtn.addEventListener('click', () => closeMenu());
 
 function refreshMenu() {
-  for (const b of sceneBox.children) b.classList.toggle('active', b.dataset.scene === currentScene);
+  for (const g of groups) for (const b of g.box.children) b.classList.toggle('active', b.dataset.id === settings[g.key]);
   startBtn.textContent = started ? 'Resume' : 'Start Flying';
 }
 function openMenu() {
   if (state === 'crashed') finishCrash();
   state = 'menu';
+  sound.pause();
   menuEl.classList.remove('hidden');
   hud.show(false);
   refreshMenu();
 }
 function closeMenu() {
+  sound.init();
+  sound.resume();
   menuEl.classList.add('hidden');
   hud.show(true);
   state = 'playing';
@@ -254,9 +236,9 @@ function respawnAt(pos, dir) {
 
 function checkCollision() {
   const p = flight.pos;
-  if (p.y - 0.8 < world.solidAt(p.x, p.z)) return true;
+  if (p.y - plane.gearDepth < world.solidAt(p.x, p.z)) return true; // wheels touching down
   for (const s of [-1, 1]) {
-    _t.copy(flight.right).multiplyScalar(5.6 * s).add(p);
+    _t.copy(flight.right).multiplyScalar(plane.halfSpan * s).add(p);
     if (_t.y < world.solidAt(_t.x, _t.z)) return true;
   }
   _t.copy(flight.forward).multiplyScalar(3.5).add(p);
@@ -330,7 +312,6 @@ function updateCamera(dt) {
   const fov = 62 + (flight.speed - 72) * 0.18;
   if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
   camera.updateMatrixWorld();
-  sky.position.copy(camera.position);
 }
 
 // ---------------------------------------------------------------------------
@@ -371,10 +352,13 @@ function frame(now) {
   // clouds: thicker fog + white-out overlay while inside one
   const f = clouds.update(flight.pos, flight.forward);
   cloudF += (f - cloudF) * (1 - Math.exp(-dt * 6));
-  scene.fog.density = baseFog + cloudF * 0.006;
+  scene.fog.density = atmo.baseFog + cloudF * 0.006;
   hud.setCloud(state === 'menu' ? 0 : cloudF);
 
   updateCamera(dt);
+  atmo.update(dt, camera, flight.vel, flight.forward, world);
+  clouds.render(camera.position);
+  plane.strobe.visible = (elapsed % 1.2) < 0.08;
 
   if (state !== 'menu') {
     hud.setStats(stats);
@@ -389,10 +373,13 @@ function frame(now) {
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
-loadScene(SCENE_LIST.some((s) => s.id === settings.scene) ? settings.scene : 'mountains');
+if (!SCENE_LIST.some((s) => s.id === settings.scene)) settings.scene = 'mountains';
+if (!TIME_LIST.some((s) => s.id === settings.time)) settings.time = 'sunset';
+if (!WEATHER_LIST.some((s) => s.id === settings.weather)) settings.weather = 'clear';
+loadScene(settings.scene);
 refreshMenu();
 document.getElementById('loading')?.remove();
 requestAnimationFrame((t) => { lastT = t; frame(t); });
 
 // handy for debugging from the console
-window.__sim = { flight, get course() { return course; }, get world() { return world; }, get state() { return state; }, get lastT() { return lastT; }, stats, settings };
+window.__sim = { flight, get course() { return course; }, get world() { return world; }, get state() { return state; }, get lastT() { return lastT; }, get look() { return look; }, atmo, stats, settings };

@@ -5,12 +5,14 @@ import { mulberry32 } from './noise.js';
 
 export const RING_RADIUS = 13;
 const AHEAD = 10;
+const FIRST_RING_DIST = 170;
 
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3();
 
 export class Course {
-  constructor(scene, world, clouds, seed = 1234) {
+  constructor(scene, world, clouds, seed = 1234, spacing = 340) {
     this.scene = scene; this.world = world; this.clouds = clouds;
+    this.spacing = spacing; // average distance between rings (m)
     this.group = new THREE.Group();
     scene.add(this.group);
     this.geo = new THREE.TorusGeometry(RING_RADIUS, 1.3, 14, 56);
@@ -46,13 +48,16 @@ export class Course {
   _genPoint() {
     const def = this.world.def;
     const last = this.pts[this.pts.length - 1];
-    const d = 240 + this.rnd() * 90;
+    // first ring sits straight ahead on the starting flight path, close by;
+    // after that rings are spaced around this.spacing (+/-15%)
+    const first = this.pts.length === 1;
+    const d = first ? FIRST_RING_DIST : this.spacing * (0.85 + this.rnd() * 0.3);
     this.phase += 0.55 + this.rnd() * 0.55;
     const desired = Math.sin(this.phase) * 0.34 + (this.rnd() - 0.5) * 0.12;
 
     // pick a heading change: follow the wavy "desired" turn but prefer low ground
     let best = this.heading, bestCost = Infinity;
-    for (let k = -3; k <= 3; k++) {
+    for (let k = first ? 0 : -3; k <= (first ? 0 : 3); k++) {
       const dth = k * 0.13, th = this.heading + dth;
       const dx = Math.sin(th), dz = -Math.cos(th);
       let gh = 0;
@@ -69,7 +74,7 @@ export class Course {
     const minAlt = Math.max(corridor + def.clearance, ahead + def.clearance - 50);
     this.altPhase += 0.5 + this.rnd() * 0.4;
     const pref = minAlt + 20 + (Math.sin(this.altPhase) * 0.5 + 0.5) * 80;
-    let y = THREE.MathUtils.clamp(pref, last.y - 65, last.y + 65);
+    let y = first ? last.y : THREE.MathUtils.clamp(pref, last.y - 65, last.y + 65);
     y = Math.min(Math.max(y, minAlt), 1600);
     p.y = y;
     this.pts.push(p);
@@ -97,7 +102,8 @@ export class Course {
     this.rings.push({ pos, tan, mesh, state: 'pending', t: 0 });
 
     // sometimes put a cloud bank across the path so you fly through it
-    if (this.clouds && this.rnd() < 0.3) {
+    // (keep the opening stretch clear so the first rings are easy to see)
+    if (this.clouds && this.rings.length > 2 && this.rnd() < this.clouds.pathChance) {
       const mid = prev.clone().lerp(pos, 0.5);
       const side = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
       mid.addScaledVector(side, (this.rnd() - 0.5) * 60);

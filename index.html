@@ -18,6 +18,7 @@
   <canvas id="c"></canvas>
   <div id="cloudfog"></div>
   <div id="flash"></div>
+  <div id="lightning"></div>
   <div id="loading">Loading…</div>
 
   <div id="hud" class="hidden">
@@ -46,10 +47,20 @@
       <h1>SKY RINGS</h1>
       <p class="sub">Fly through the golden rings. Don't hit the ground.</p>
       <h3>Scene</h3>
-      <div id="scenes"></div>
+      <div id="scenes" class="grid"></div>
+      <h3>Time of day</h3>
+      <div id="times" class="grid four"></div>
+      <h3>Weather</h3>
+      <div id="weathers" class="grid three"></div>
       <h3>Options</h3>
       <label class="opt"><input type="checkbox" id="optInvert" /> Invert pitch (↑ = nose down)</label>
       <label class="opt"><input type="checkbox" id="optLevel" checked /> Auto-level wings when no key is held</label>
+      <label class="opt"><input type="checkbox" id="optSound" checked /> Sound (rain &amp; thunder)</label>
+      <label class="opt range">
+        <span>Ring spacing</span>
+        <input type="range" id="optGap" min="200" max="600" step="10" />
+        <span id="optGapVal" class="rangeval"></span>
+      </label>
       <button id="start">Start Flying</button>
       <div class="keys">
         <span><kbd>←</kbd><kbd>→</kbd> roll / bank to turn</span>
